@@ -13,7 +13,30 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="page">
+  <p id="boot" class="boot">Loading the ledger…</p>
+  <section id="auth" class="auth" hidden>
+    <div class="auth-card">
+      <p class="eyebrow">Buy &amp; sell</p>
+      <h2 id="authHeading">Sign in</h2>
+      <p id="authMessage" class="hint"></p>
+      <form id="authForm" class="fields" autocomplete="on">
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" required autocomplete="username">
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="password" type="password" required minlength="6" autocomplete="current-password">
+        </label>
+        <div class="sheet-actions end">
+          <button type="submit" class="primary" id="authSubmit">Sign in</button>
+        </div>
+      </form>
+      <button type="button" class="quiet" id="authSwitch">Create an account</button>
+    </div>
+  </section>
+
+  <div class="page" id="app" hidden>
     <header class="top">
       <div class="brand">
         <img class="mark" src="images/logo.png" alt="BNS">
@@ -22,7 +45,10 @@
           <h1 id="pageTitle">Dashboard</h1>
         </div>
       </div>
-      <button type="button" class="primary" id="addBtn" hidden>Add item</button>
+      <div class="top-actions">
+        <button type="button" class="quiet" id="signOutBtn">Sign out</button>
+        <button type="button" class="primary" id="addBtn" hidden>Add item</button>
+      </div>
     </header>
 
     <nav id="tabs" class="tabs" role="tablist" aria-label="Sections">
@@ -70,20 +96,20 @@
     <section id="panel-inventory" class="panel" role="tabpanel" aria-labelledby="tab-inventory" hidden>
       <dl class="stats" aria-label="Stock summary">
         <div>
-          <dt>On hand</dt>
+          <dt># of stock</dt>
           <dd id="stat-qty">0</dd>
         </div>
         <div>
-          <dt>Cost value</dt>
+          <dt title="Cost of the stock on hand">Money invested</dt>
           <dd id="stat-cost">₱0.00</dd>
         </div>
         <div>
-          <dt>List value</dt>
-          <dd id="stat-list">₱0.00</dd>
+          <dt title="List price minus cost, for stock still on hand">Projected profit</dt>
+          <dd id="stat-profit">₱0.00</dd>
         </div>
         <div>
-          <dt>Profit booked</dt>
-          <dd id="stat-profit">₱0.00</dd>
+          <dt title="On hand with a list price at or below cost">Items to reprice</dt>
+          <dd id="stat-reprice">0</dd>
         </div>
       </dl>
 
@@ -275,7 +301,7 @@
     </section>
 
     <footer>
-      <p>Saved in this browser.</p>
+      <p>Saved to your account.</p>
     </footer>
   </div>
 
@@ -447,6 +473,6 @@
   <noscript>
     <p class="noscript">This tracker needs JavaScript to run in the browser.</p>
   </noscript>
-  <script src="app.js"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

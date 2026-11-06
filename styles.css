@@ -67,6 +67,44 @@ textarea:focus-visible {
   margin: 0 auto;
 }
 
+.boot {
+  width: min(1040px, calc(100% - 48px));
+  margin: 48px auto;
+  color: var(--muted);
+}
+
+.auth {
+  width: min(420px, calc(100% - 48px));
+  margin: 10vh auto 48px;
+}
+
+.auth-card {
+  background: #fffcf7;
+  border: 1px solid rgba(47, 78, 60, 0.16);
+  box-shadow: 10px 10px 0 var(--gold);
+  padding: 28px 26px 22px;
+}
+
+.auth-card h2 {
+  margin: 6px 0 0;
+  font-weight: 500;
+  font-size: 36px;
+  letter-spacing: -0.03em;
+}
+
+.auth-card .fields {
+  grid-template-columns: 1fr;
+  margin-top: 22px;
+}
+
+.auth-card .quiet { margin-top: 18px; }
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
 .eyebrow {
   margin: 0;
   font-size: 11px;
@@ -243,7 +281,8 @@ th button,
 
 .search input,
 .sheet input,
-.sheet textarea {
+.sheet textarea,
+.auth-card input {
   width: 100%;
   background: transparent;
   border: 0;
@@ -254,7 +293,8 @@ th button,
 
 .search input:focus,
 .sheet input:focus,
-.sheet textarea:focus {
+.sheet textarea:focus,
+.auth-card input:focus {
   border-bottom-color: var(--gold);
   box-shadow: 0 1px 0 var(--gold);
 }

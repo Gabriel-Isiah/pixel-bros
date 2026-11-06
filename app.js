@@ -1,4 +1,13 @@
+import { createClient } from "@supabase/supabase-js";
+
 const KEY = "bns-inventory-v1";
+const IMPORTED = "bns-imported-v1";
+const TABLES = ["items", "movements", "expenses", "upcoming", "investors"];
+
+const supabaseKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+const secretKey = supabaseKey.startsWith("sb_secret_");
+const supabase = supabaseUrl && supabaseKey && !secretKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -286,41 +295,145 @@ function normalize(data) {
   };
 }
 
-function load() {
+function emptyLedger() {
+  return { items: [], movements: [], expenses: [], upcoming: [], investors: [] };
+}
+
+function ledgerSignature(ledger) {
+  return JSON.stringify({
+    items: ledger.items,
+    movements: ledger.movements,
+    expenses: ledger.expenses || [],
+    upcoming: ledger.upcoming || [],
+    investors: ledger.investors || [],
+  });
+}
+
+function readLocalLedger() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const normalized = normalize(JSON.parse(raw));
-      if (normalized) {
-        const sample = seed();
-        let changed = false;
-        for (const key of ["expenses", "upcoming", "investors"]) {
-          if (normalized[key] == null) {
-            normalized[key] = sample[key];
-            changed = true;
-          }
-        }
-        if (changed) {
-          try {
-            localStorage.setItem(KEY, JSON.stringify(normalized));
-          } catch (_) {
-            /* Keep the filled sample for this visit. */
-          }
-        }
-        return normalized;
-      }
+    if (!raw) return null;
+    const normalized = normalize(JSON.parse(raw));
+    if (!normalized) return null;
+    for (const key of ["expenses", "upcoming", "investors"]) {
+      if (normalized[key] == null) normalized[key] = [];
     }
+    return normalized;
   } catch (_) {
-    /* Use the sample ledger when stored data cannot be read. */
+    return null;
   }
+}
 
-  const seeded = seed();
-  try {
-    localStorage.setItem(KEY, JSON.stringify(seeded));
-  } catch (_) {
-    /* The ledger still works for this visit. */
+function ledgerIsEmpty(ledger) {
+  return TABLES.every((table) => ledger[table].length === 0);
+}
+
+function itemRow(item, userId) {
+  return {
+    user_id: userId,
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    quantity: item.quantity,
+    cost: item.cost,
+    price: item.price,
+    reorder_at: item.reorderAt,
+    notes: item.notes,
+  };
+}
+
+function movementRow(movement, userId) {
+  return {
+    user_id: userId,
+    id: movement.id,
+    type: movement.type,
+    item_id: movement.itemId || "",
+    item_name: movement.itemName,
+    quantity: movement.quantity,
+    unit_cost: movement.unitCost,
+    unit_price: movement.unitPrice,
+    profit: movement.profit,
+    terms: movement.terms === "cop" || movement.terms === "cod" ? movement.terms : null,
+    at: movement.at || new Date().toISOString(),
+  };
+}
+
+function storedExpense(row, userId) {
+  return {
+    user_id: userId,
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    amount: row.amount,
+    date: row.date || null,
+    notes: row.notes,
+  };
+}
+
+function investorRow(row, userId) {
+  return {
+    user_id: userId,
+    id: row.id,
+    name: row.name,
+    amount: row.amount,
+    share: row.share,
+    date: row.date || null,
+    notes: row.notes,
+  };
+}
+
+function rowsFor(table, ledger, userId) {
+  if (table === "items") return ledger.items.map((item) => itemRow(item, userId));
+  if (table === "movements") return ledger.movements.map((movement) => movementRow(movement, userId));
+  if (table === "investors") return ledger.investors.map((row) => investorRow(row, userId));
+  return ledger[table].map((row) => storedExpense(row, userId));
+}
+
+function fromRemote(table, rows) {
+  if (table === "items") {
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      quantity: row.quantity,
+      cost: row.cost,
+      price: row.price,
+      reorderAt: row.reorder_at,
+      notes: row.notes,
+    }));
   }
-  return seeded;
+  if (table === "movements") {
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      itemId: row.item_id,
+      itemName: row.item_name,
+      quantity: row.quantity,
+      unitCost: row.unit_cost,
+      unitPrice: row.unit_price,
+      profit: row.profit,
+      terms: row.terms,
+      at: row.at,
+    }));
+  }
+  if (table === "investors") {
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      amount: row.amount,
+      share: row.share,
+      date: row.date || "",
+      notes: row.notes,
+    }));
+  }
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    amount: row.amount,
+    date: row.date || "",
+    notes: row.notes,
+  }));
 }
 
 function currentTab() {
@@ -328,7 +441,13 @@ function currentTab() {
   return TABS.includes(id) ? id : "dashboard";
 }
 
-let state = load();
+let state = emptyLedger();
+let userId = null;
+let loadToken = 0;
+let authMode = "sign-in";
+let saving = false;
+let dirty = false;
+let saveDone = Promise.resolve();
 const ui = { query: "", filter: "all", sort: "name", dir: "asc", flashId: null, tab: currentTab() };
 let editingId = null;
 let tradeId = null;
@@ -340,14 +459,170 @@ let toastTimer = 0;
 let flashTimer = 0;
 let lastFocus = null;
 
-function save() {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(state));
-    return true;
-  } catch (_) {
-    notify("Could not save in this browser.");
-    return false;
+async function replaceTable(id, table, rows) {
+  let query = supabase.from(table).select("id").eq("user_id", id);
+  const existing = await query;
+  if (existing.error) return existing.error;
+  if (rows.length) {
+    const written = await supabase.from(table).upsert(rows, { onConflict: "user_id,id" });
+    if (written.error) return written.error;
   }
+  const keep = new Set(rows.map((row) => row.id));
+  const stale = (existing.data || []).map((row) => row.id).filter((rowId) => !keep.has(rowId));
+  if (!stale.length) return null;
+  const removed = await supabase.from(table).delete().eq("user_id", id).in("id", stale);
+  return removed.error;
+}
+
+async function writeLedger(id, ledger) {
+  const errors = await Promise.all(TABLES.map((table) => replaceTable(id, table, rowsFor(table, ledger, id))));
+  return errors.find(Boolean) || null;
+}
+
+function save() {
+  if (!userId) return false;
+  dirty = true;
+  if (!saving) {
+    saving = true;
+    saveDone = flush();
+  }
+  return true;
+}
+
+async function flush() {
+  try {
+    while (dirty && userId) {
+      dirty = false;
+      const id = userId;
+      const snapshot = structuredClone(state);
+      const error = await writeLedger(id, snapshot);
+      if (error) {
+        notify(`Could not save. ${error.message}`);
+        break;
+      }
+    }
+  } finally {
+    saving = false;
+    if (dirty && userId) {
+      saving = true;
+      saveDone = flush();
+    }
+  }
+}
+
+async function fetchLedger(id) {
+  const results = await Promise.all(TABLES.map((table) => {
+    let query = supabase.from(table).select("*").eq("user_id", id);
+    if (table === "movements") query = query.order("at", { ascending: true });
+    return query;
+  }));
+  const failed = results.find((result) => result.error);
+  if (failed) throw new Error(failed.error.message);
+  const data = {};
+  TABLES.forEach((table, index) => {
+    data[table] = fromRemote(table, results[index].data || []);
+  });
+  const normalized = normalize(data);
+  if (!normalized) throw new Error("Could not read the ledger.");
+  for (const key of ["expenses", "upcoming", "investors"]) {
+    if (normalized[key] == null) normalized[key] = [];
+  }
+  return normalized;
+}
+
+async function maybeImportLocal(id, remote) {
+  if (localStorage.getItem(IMPORTED)) return remote;
+  if (!ledgerIsEmpty(remote)) {
+    localStorage.setItem(IMPORTED, "1");
+    return remote;
+  }
+  const local = readLocalLedger();
+  const sample = normalize(seed());
+  for (const key of ["expenses", "upcoming", "investors"]) {
+    if (sample[key] == null) sample[key] = [];
+  }
+  if (!local || ledgerSignature(local) === ledgerSignature(sample)) {
+    localStorage.setItem(IMPORTED, "1");
+    return remote;
+  }
+  const error = await writeLedger(id, local);
+  if (error) throw new Error(error.message);
+  localStorage.setItem(IMPORTED, "1");
+  localStorage.removeItem(KEY);
+  return local;
+}
+
+function showSetup() {
+  $("#boot").hidden = true;
+  $("#auth").hidden = false;
+  $("#authForm").hidden = true;
+  $("#authSwitch").hidden = true;
+  $("#authHeading").textContent = "Connect Supabase";
+  $("#authMessage").textContent = secretKey
+    ? "Use the publishable key from Supabase, not the secret key. Put it in VITE_SUPABASE_ANON_KEY on Vercel, then redeploy."
+    : "Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY on Vercel, then redeploy. Locally, put them in .env and restart.";
+}
+
+function showAuth() {
+  loadToken += 1;
+  userId = null;
+  $("#boot").hidden = true;
+  $("#auth").hidden = false;
+  $("#app").hidden = true;
+}
+
+function showApp() {
+  $("#boot").hidden = true;
+  $("#auth").hidden = true;
+  $("#app").hidden = false;
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const signIn = mode === "sign-in";
+  $("#authHeading").textContent = signIn ? "Sign in" : "Create an account";
+  $("#authSubmit").textContent = signIn ? "Sign in" : "Create account";
+  $("#authSwitch").textContent = signIn ? "Create an account" : "Already have an account? Sign in";
+  $("#authMessage").textContent = "";
+  $("#authForm").password.autocomplete = signIn ? "current-password" : "new-password";
+}
+
+async function openLedger(session) {
+  const token = ++loadToken;
+  const id = session.user.id;
+  if (id === userId) {
+    showApp();
+    return;
+  }
+  $("#boot").hidden = false;
+  $("#auth").hidden = true;
+  $("#app").hidden = true;
+  try {
+    let ledger = await fetchLedger(id);
+    if (token !== loadToken) return;
+    ledger = await maybeImportLocal(id, ledger);
+    if (token !== loadToken) return;
+    userId = id;
+    state = ledger;
+    showApp();
+    render();
+  } catch (error) {
+    if (token !== loadToken) return;
+    showAuth();
+    $("#authMessage").textContent = error.message || "Could not load the ledger.";
+  }
+}
+
+function boot() {
+  if (!supabase) {
+    showSetup();
+    return;
+  }
+  showAuth();
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (session) openLedger(session);
+    else showAuth();
+  });
 }
 
 function itemById(id) {
@@ -469,10 +744,13 @@ function rowHTML(item) {
 
 function renderStats() {
   const summary = stats();
+  const projected = summary.list - summary.cost;
   $("#stat-qty").textContent = String(summary.quantity);
   $("#stat-cost").textContent = money(summary.cost);
-  $("#stat-list").textContent = money(summary.list);
-  $("#stat-profit").textContent = money(summary.profit);
+  const profitEl = $("#stat-profit");
+  profitEl.textContent = money(projected);
+  profitEl.classList.toggle("neg", projected < 0);
+  $("#stat-reprice").textContent = String(state.items.filter(needsReprice).length);
 }
 
 function renderFilters() {
@@ -1244,7 +1522,41 @@ function markPaid(id) {
   render();
 }
 
+async function onAuthSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const email = form.email.value.trim();
+  const password = form.password.value;
+  $("#authSubmit").disabled = true;
+  $("#authMessage").textContent = "";
+  const result = authMode === "sign-in"
+    ? await supabase.auth.signInWithPassword({ email, password })
+    : await supabase.auth.signUp({ email, password });
+  $("#authSubmit").disabled = false;
+  if (result.error) {
+    $("#authMessage").textContent = result.error.message;
+    return;
+  }
+  if (authMode === "sign-up" && !result.data.session) {
+    setAuthMode("sign-in");
+    form.email.value = email;
+    $("#authMessage").textContent = "Check your email to confirm the account, then sign in.";
+  }
+}
+
+async function signOut() {
+  while (dirty || saving) await saveDone;
+  const { error } = await supabase.auth.signOut();
+  if (error) notify(error.message);
+}
+
 function bind() {
+  $("#authForm").addEventListener("submit", onAuthSubmit);
+  $("#authSwitch").addEventListener("click", () => {
+    setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in");
+  });
+  $("#signOutBtn").addEventListener("click", signOut);
+
   $("#addBtn").addEventListener("click", () => {
     if (ui.tab === "inventory") openItemDialog(null);
     else if (ui.tab === "expenses") openRecord("expense");
@@ -1373,4 +1685,4 @@ function bind() {
 }
 
 bind();
-render();
+boot();
