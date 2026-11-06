@@ -531,6 +531,53 @@ dd.neg { color: var(--gold-ink); }
   white-space: nowrap;
 }
 
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex: none;
+}
+
+.sell-act,
+.icon-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+}
+
+.sell-act {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.sell-act:hover { background: #243c2e; }
+
+.sell-act:disabled {
+  background: transparent;
+  color: #8aa094;
+  border-color: #c5d0c9;
+  cursor: not-allowed;
+}
+
+.icon-act:hover { color: var(--gold-ink); }
+
+.icon-act.armed { color: var(--gold-ink); }
+
 .texty:hover {
   text-decoration: underline;
   text-decoration-color: var(--gold);

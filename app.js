@@ -525,6 +525,7 @@ const ui = { query: "", filter: "all", sort: "name", dir: "asc", flashId: null, 
 let editingId = null;
 let tradeId = null;
 let removeArmed = false;
+let deleteArmedId = null;
 let recordKind = "expense";
 let recordId = null;
 let recordRemoveArmed = false;
@@ -769,22 +770,25 @@ function visibleItems() {
   items.sort((a, b) => {
     let cmp = 0;
     if (ui.sort === "name") cmp = a.name.localeCompare(b.name);
+    else if (ui.sort === "type") cmp = a.category.localeCompare(b.category);
+    else if (ui.sort === "condition") cmp = (a.condition || "").localeCompare(b.condition || "");
     else if (ui.sort === "quantity") cmp = a.quantity - b.quantity;
     else if (ui.sort === "cost") cmp = a.cost - b.cost;
     else if (ui.sort === "price") cmp = a.price - b.price;
-    else if (ui.sort === "margin") {
-      cmp = (marginPct(a.cost, a.price) ?? -9999) - (marginPct(b.cost, b.price) ?? -9999);
-    }
+    else if (ui.sort === "profit") cmp = (a.price - a.cost) - (b.price - b.cost);
     if (cmp === 0) cmp = a.name.localeCompare(b.name);
     return cmp * dir;
   });
   return items;
 }
 
+const ICON_CHECK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.2 6.2 11.5 13 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_PENCIL = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9.2 3.3 12.7 6.8 5.5 14H2v-3.5L9.2 3.3Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="m7.8 4.7 3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
+const ICON_TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 4.5h9.6M6.2 4.5V3h3.6v1.5M4.4 4.5l.6 8.3h6l.6-8.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 function rowHTML(item) {
   const status = statusOf(item);
-  const pct = marginPct(item.cost, item.price);
-  const margin = pct === null ? "—" : `${pct}%`;
+  const profit = item.price - item.cost;
   const flag = status === "low"
     ? '<span class="flag">Low</span>'
     : status === "out"
@@ -796,22 +800,24 @@ function rowHTML(item) {
   ].filter(Boolean).join(" ");
   const id = esc(item.id);
   const name = esc(item.name);
+  const armed = deleteArmedId === item.id;
 
   return `<tr data-id="${id}" class="${classes}">
     <td class="item" data-label="">
       <button type="button" class="item-name" data-action="edit" data-id="${id}">${name}</button>
-      <span class="category">${esc([item.category, item.condition].filter(Boolean).join(" · "))}</span>
     </td>
+    <td data-label="Type">${esc(item.category)}</td>
+    <td data-label="Condition">${esc(item.condition || "—")}</td>
     <td class="num" data-label="On hand"><span class="qty-wrap">${item.quantity}${flag}</span></td>
     <td class="num" data-label="Buy">${money(item.cost)}</td>
     <td class="num" data-label="Sell">${money(item.price)}</td>
-    <td class="num${pct !== null && pct < 0 ? " neg" : ""}" data-label="Margin">${margin}</td>
+    <td class="num${profit < 0 ? " neg" : ""}" data-label="Profit">${money(profit)}</td>
     <td class="actions" data-label="">
-      <button type="button" class="texty" data-action="sell" data-id="${id}" ${item.quantity < 1 ? "disabled" : ""} aria-label="Sell ${name}">Sell</button>
-      <span class="dot" aria-hidden="true">·</span>
-      <button type="button" class="texty" data-action="restock" data-id="${id}" aria-label="Restock ${name}">Restock</button>
-      <span class="dot" aria-hidden="true">·</span>
-      <button type="button" class="texty" data-action="edit" data-id="${id}" aria-label="Edit ${name}">Edit</button>
+      <div class="row-actions">
+        <button type="button" class="sell-act" data-action="sell" data-id="${id}" ${item.quantity < 1 ? "disabled" : ""} aria-label="Sell ${name}">${ICON_CHECK}<span>Sell</span></button>
+        <button type="button" class="icon-act" data-action="edit" data-id="${id}" aria-label="Edit ${name}">${ICON_PENCIL}</button>
+        <button type="button" class="icon-act${armed ? " armed" : ""}" data-action="delete" data-id="${id}" aria-label="${armed ? `Confirm delete ${name}` : `Delete ${name}`}">${ICON_TRASH}</button>
+      </div>
     </td>
   </tr>`;
 }
@@ -861,7 +867,7 @@ function renderRows() {
     const message = state.items.length === 0
       ? "No items yet. Add the first piece you buy."
       : "Nothing in this view.";
-    tbody.innerHTML = `<tr><td class="empty" colspan="6">${message}</td></tr>`;
+    tbody.innerHTML = `<tr><td class="empty" colspan="8">${message}</td></tr>`;
     return;
   }
   tbody.innerHTML = items.map(rowHTML).join("");
@@ -1409,6 +1415,21 @@ function onItemSubmit(event) {
   $("#itemDialog").close();
 }
 
+function deleteItem(id) {
+  if (deleteArmedId !== id) {
+    deleteArmedId = id;
+    render();
+    return;
+  }
+  const item = itemById(id);
+  if (!item) return;
+  state.items = state.items.filter((entry) => entry.id !== id);
+  deleteArmedId = null;
+  notify(`Removed ${item.name}.`);
+  save();
+  render();
+}
+
 function removeItem() {
   if (!editingId) return;
   if (!removeArmed) {
@@ -1812,9 +1833,15 @@ function bind() {
     const button = event.target.closest("[data-action]");
     if (!button || button.disabled) return;
     const { id, action } = button.dataset;
+    if (action === "delete") {
+      deleteItem(id);
+      return;
+    }
+    const wasArmed = deleteArmedId != null;
+    deleteArmedId = null;
+    if (wasArmed) render();
     if (action === "edit") openItemDialog(id);
     else if (action === "sell") openSell(id);
-    else if (action === "restock") openRestock(id);
   });
 
   $("#itemForm").addEventListener("submit", onItemSubmit);
