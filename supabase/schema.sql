@@ -11,9 +11,12 @@ create table if not exists public.items (
   cost integer not null default 0 check (cost >= 0),
   price integer not null default 0 check (price >= 0),
   reorder_at integer not null default 0 check (reorder_at >= 0),
+  condition text not null default '',
   notes text not null default '',
   primary key (user_id, id)
 );
+
+alter table public.items add column if not exists condition text not null default '';
 
 create table if not exists public.movements (
   user_id uuid not null references auth.users (id) on delete cascade,

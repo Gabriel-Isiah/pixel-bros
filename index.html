@@ -145,7 +145,7 @@
       <div class="toolbar">
         <label class="search">
           <span class="eyebrow">Search</span>
-          <input id="search" type="search" placeholder="Name, category, or notes" autocomplete="off">
+          <input id="search" type="search" placeholder="Name, type, or notes" autocomplete="off">
         </label>
         <div class="filters" role="group" aria-label="Filter by stock">
           <button type="button" class="filter" data-filter="all" aria-pressed="true">All <span data-count="all">0</span></button>
@@ -162,8 +162,8 @@
             <tr>
               <th scope="col" aria-sort="ascending"><button type="button" data-sort="name">Item</button></th>
               <th scope="col" class="num" aria-sort="none"><button type="button" data-sort="quantity">On hand</button></th>
-              <th scope="col" class="num" aria-sort="none"><button type="button" data-sort="cost">Cost</button></th>
-              <th scope="col" class="num" aria-sort="none"><button type="button" data-sort="price">List</button></th>
+              <th scope="col" class="num" aria-sort="none"><button type="button" data-sort="cost">Buy</button></th>
+              <th scope="col" class="num" aria-sort="none"><button type="button" data-sort="price">Sell</button></th>
               <th scope="col" class="num" aria-sort="none"><button type="button" data-sort="margin" title="Share of the list price above cost">Margin</button></th>
               <th scope="col"><span class="sr-only">Actions</span></th>
             </tr>
@@ -345,24 +345,20 @@
           <span>Name</span>
           <input name="name" required maxlength="80" autocomplete="off">
         </label>
-        <label class="wide">
-          <span>Category</span>
-          <input name="category" required maxlength="40" list="categories" autocomplete="off">
+        <label id="field-type">
+          <span>Type</span>
+          <select name="category" required></select>
+        </label>
+        <label id="field-condition">
+          <span>Condition</span>
+          <select name="condition" required></select>
         </label>
         <label>
-          <span>On hand</span>
-          <input name="quantity" type="number" min="0" step="1" inputmode="numeric" required aria-describedby="qtyHint">
-        </label>
-        <label>
-          <span title="Flag this item when stock is at or below this number. Use 0 to skip.">Reorder at</span>
-          <input name="reorderAt" type="number" min="0" step="1" inputmode="numeric" required>
-        </label>
-        <label>
-          <span>Unit cost</span>
+          <span>Buy price</span>
           <input name="cost" type="number" min="0" step="0.01" inputmode="decimal" required>
         </label>
         <label>
-          <span>List price</span>
+          <span>Sell price</span>
           <input name="price" type="number" min="0" step="0.01" inputmode="decimal" required>
         </label>
         <label class="wide">
@@ -370,7 +366,6 @@
           <textarea name="notes" maxlength="280" rows="3"></textarea>
         </label>
       </div>
-      <p id="qtyHint" class="hint"></p>
       <p id="itemPreview" class="preview" aria-live="polite"></p>
       <div class="sheet-actions">
         <button type="button" class="remove" id="removeBtn" hidden>Remove item</button>
@@ -379,7 +374,6 @@
           <button type="submit" class="primary">Save item</button>
         </div>
       </div>
-      <datalist id="categories"></datalist>
     </form>
   </dialog>
 

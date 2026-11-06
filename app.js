@@ -330,6 +330,7 @@ function normalize(data) {
       id: String(raw.id),
       name: String(raw.name),
       category: String(raw.category || "General"),
+      condition: String(raw.condition || ""),
       quantity: Math.max(0, int(raw.quantity)),
       cost: Math.max(0, Math.round(Number(raw.cost) || 0)),
       price: Math.max(0, Math.round(Number(raw.price) || 0)),
@@ -404,6 +405,7 @@ function itemRow(item, userId) {
     id: item.id,
     name: item.name,
     category: item.category,
+    condition: item.condition || "",
     quantity: item.quantity,
     cost: item.cost,
     price: item.price,
@@ -465,6 +467,7 @@ function fromRemote(table, rows) {
       id: row.id,
       name: row.name,
       category: row.category,
+      condition: row.condition || "",
       quantity: row.quantity,
       cost: row.cost,
       price: row.price,
@@ -749,7 +752,7 @@ function stats() {
 function matchesQuery(item) {
   const query = ui.query.trim().toLowerCase();
   if (!query) return true;
-  return `${item.name} ${item.category} ${item.notes}`.toLowerCase().includes(query);
+  return `${item.name} ${item.category} ${item.condition || ""} ${item.notes}`.toLowerCase().includes(query);
 }
 
 function visibleItems() {
@@ -797,11 +800,11 @@ function rowHTML(item) {
   return `<tr data-id="${id}" class="${classes}">
     <td class="item" data-label="">
       <button type="button" class="item-name" data-action="edit" data-id="${id}">${name}</button>
-      <span class="category">${esc(item.category)}</span>
+      <span class="category">${esc([item.category, item.condition].filter(Boolean).join(" · "))}</span>
     </td>
     <td class="num" data-label="On hand"><span class="qty-wrap">${item.quantity}${flag}</span></td>
-    <td class="num" data-label="Cost">${money(item.cost)}</td>
-    <td class="num" data-label="List">${money(item.price)}</td>
+    <td class="num" data-label="Buy">${money(item.cost)}</td>
+    <td class="num" data-label="Sell">${money(item.price)}</td>
     <td class="num${pct !== null && pct < 0 ? " neg" : ""}" data-label="Margin">${margin}</td>
     <td class="actions" data-label="">
       <button type="button" class="texty" data-action="sell" data-id="${id}" ${item.quantity < 1 ? "disabled" : ""} aria-label="Sell ${name}">Sell</button>
@@ -1254,10 +1257,38 @@ function render() {
   renderInvestors();
 }
 
-function fillCategories() {
-  const categories = [...new Set(state.items.map((item) => item.category).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
-  $("#categories").innerHTML = categories.map((category) => `<option value="${esc(category)}"></option>`).join("");
+const ITEM_TYPES = ["Game", "Hardware", "Accessory"];
+
+const ITEM_CONDITIONS = {
+  Game: ["Complete w/ Case", "Cartridge Only"],
+  Hardware: ["Complete w/ Box & Charger", "Complete Accessories", "Charger Only", "Unit Only", "Others"],
+  Accessory: [],
+};
+
+function fillTypes(selected) {
+  const select = $("#itemForm").category;
+  const values = !selected || ITEM_TYPES.includes(selected) ? ITEM_TYPES : [selected, ...ITEM_TYPES];
+  select.innerHTML = values.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+  select.value = selected && values.includes(selected) ? selected : ITEM_TYPES[0];
+}
+
+function fillConditions(type, selected) {
+  const field = $("#field-condition");
+  const select = $("#itemForm").condition;
+  const options = ITEM_CONDITIONS[type] || [];
+  $("#field-type").classList.toggle("wide", options.length === 0);
+  if (options.length === 0) {
+    field.hidden = true;
+    select.required = false;
+    select.innerHTML = "";
+    select.setCustomValidity("");
+    return;
+  }
+  field.hidden = false;
+  select.required = true;
+  const values = selected && !options.includes(selected) ? [selected, ...options] : options;
+  select.innerHTML = values.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+  select.value = selected && values.includes(selected) ? selected : options[0];
 }
 
 function setRemoveArmed(armed) {
@@ -1270,21 +1301,14 @@ function setRemoveArmed(armed) {
 function updateItemPreview() {
   const form = $("#itemForm");
   const preview = $("#itemPreview");
-  const cost = Math.max(0, cents(form.cost.value || 0));
-  const price = Math.max(0, cents(form.price.value || 0));
-  if (form.price.value === "") {
-    preview.textContent = "Margin appears once a list price is set.";
+  if (form.cost.value === "" || form.price.value === "") {
+    preview.textContent = "Profit appears once buy and sell prices are set.";
     preview.classList.remove("neg");
     return;
   }
-  if (price <= 0) {
-    preview.textContent = "List price is zero.";
-    preview.classList.remove("neg");
-    return;
-  }
-  const unit = price - cost;
-  preview.textContent = `${marginPct(cost, price)}% margin · ${money(unit)} per unit`;
-  preview.classList.toggle("neg", unit < 0);
+  const profit = Math.max(0, cents(form.price.value || 0)) - Math.max(0, cents(form.cost.value || 0));
+  preview.textContent = `${money(profit)} profit`;
+  preview.classList.toggle("neg", profit < 0);
 }
 
 function openItemDialog(id) {
@@ -1295,24 +1319,19 @@ function openItemDialog(id) {
   form.reset();
   $("#itemHeading").textContent = item ? "Edit item" : "New item";
   $("#removeBtn").hidden = !item;
-  $("#qtyHint").textContent = item
-    ? "Changing on hand records a recount and leaves unit cost as it is. Use Restock when you buy more."
-    : "Opening quantity is recorded as a purchase at this unit cost.";
 
   if (item) {
     form.name.value = item.name;
-    form.category.value = item.category;
-    form.quantity.value = String(item.quantity);
+    fillTypes(item.category);
+    fillConditions(form.category.value, item.condition || "");
     form.cost.value = (item.cost / 100).toFixed(2);
     form.price.value = (item.price / 100).toFixed(2);
-    form.reorderAt.value = String(item.reorderAt);
     form.notes.value = item.notes;
   } else {
-    form.quantity.value = "1";
-    form.reorderAt.value = "0";
+    fillTypes("Game");
+    fillConditions("Game", "");
   }
 
-  fillCategories();
   updateItemPreview();
   rememberFocus();
   $("#itemDialog").showModal();
@@ -1329,13 +1348,17 @@ function requireText(input, message) {
 }
 
 function readItemForm(form) {
+  const existing = editingId ? itemById(editingId) : null;
+  const type = form.category.value;
+  const hasCondition = (ITEM_CONDITIONS[type] || []).length > 0;
   return {
     name: form.name.value.trim(),
-    category: form.category.value.trim(),
-    quantity: Math.max(0, int(form.quantity.value)),
+    category: type,
+    condition: hasCondition ? form.condition.value : "",
+    quantity: existing ? existing.quantity : 1,
     cost: Math.max(0, cents(form.cost.value)),
     price: Math.max(0, cents(form.price.value)),
-    reorderAt: Math.max(0, int(form.reorderAt.value)),
+    reorderAt: existing ? existing.reorderAt : 0,
     notes: form.notes.value.trim(),
   };
 }
@@ -1344,8 +1367,10 @@ function onItemSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const nameOk = requireText(form.name, "Enter a name.");
-  const categoryOk = requireText(form.category, "Enter a category.");
-  if (!nameOk || !categoryOk || !form.reportValidity()) return;
+  const typeOk = requireText(form.category, "Choose a type.");
+  const needsCondition = (ITEM_CONDITIONS[form.category.value] || []).length > 0;
+  const conditionOk = needsCondition ? requireText(form.condition, "Choose a condition.") : true;
+  if (!nameOk || !typeOk || !conditionOk || !form.reportValidity()) return;
 
   const draft = readItemForm(form);
   if (editingId) {
@@ -1794,9 +1819,10 @@ function bind() {
 
   $("#itemForm").addEventListener("submit", onItemSubmit);
   $("#itemForm").addEventListener("input", (event) => {
-    if (event.target.name === "name" || event.target.name === "category") {
+    if (event.target.name === "name" || event.target.name === "category" || event.target.name === "condition") {
       event.target.setCustomValidity("");
     }
+    if (event.target.name === "category") fillConditions(event.target.value, "");
     setRemoveArmed(false);
     updateItemPreview();
   });
