@@ -88,16 +88,38 @@
         </div>
       </dl>
       <p id="dashStock" class="dash-line"></p>
+      <div class="dash-section">
+        <h2>Months</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th class="num" title="Units sold">Sold</th>
+                <th class="num">Revenue</th>
+                <th class="num">Profit</th>
+                <th class="num" title="Change in revenue from the previous month">Vs prior</th>
+              </tr>
+            </thead>
+            <tbody id="dashMonths"></tbody>
+          </table>
+        </div>
+      </div>
       <div class="split">
         <section class="ledger">
-          <h2>Attention</h2>
-          <ul id="dashAttention"></ul>
+          <h2>Top categories</h2>
+          <ul id="dashCategories"></ul>
         </section>
         <section class="ledger">
-          <h2>Recent sales</h2>
-          <ul id="dashSales"></ul>
+          <h2>Best sellers</h2>
+          <ul id="dashItems"></ul>
         </section>
       </div>
+      <section class="ledger">
+        <h2>Time to sell</h2>
+        <p id="dashDelta" class="dash-figure">—</p>
+        <p id="dashDeltaNote" class="dash-note"></p>
+      </section>
     </section>
 
     <section id="panel-inventory" class="panel" role="tabpanel" aria-labelledby="tab-inventory" hidden>

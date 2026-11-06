@@ -136,6 +136,44 @@ function inThisMonth(day) {
   return year === now.getFullYear() && month === now.getMonth() + 1;
 }
 
+function monthKeyFromDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthKey(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return monthKeyFromDate(date);
+}
+
+function shiftMonth(key, delta) {
+  const [year, month] = key.split("-").map(Number);
+  return monthKeyFromDate(new Date(year, month - 1 + delta, 1));
+}
+
+const monthLabelFmt = new Intl.DateTimeFormat("en-PH", { month: "short", year: "numeric" });
+
+function monthLabel(key) {
+  const [year, month] = key.split("-").map(Number);
+  return monthLabelFmt.format(new Date(year, month - 1, 1));
+}
+
+function calendarDaysBetween(earlierIso, laterIso) {
+  const earlier = new Date(earlierIso);
+  const later = new Date(laterIso);
+  if (Number.isNaN(earlier.getTime()) || Number.isNaN(later.getTime())) return null;
+  const start = new Date(earlier.getFullYear(), earlier.getMonth(), earlier.getDate());
+  const end = new Date(later.getFullYear(), later.getMonth(), later.getDate());
+  return Math.round((end - start) / 86400000);
+}
+
+function formatDays(value) {
+  if (value == null) return "—";
+  const rounded = Math.round(value * 10) / 10;
+  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return `${text} ${rounded === 1 ? "day" : "days"}`;
+}
+
 function sumAmount(rows) {
   return rows.reduce((sum, row) => sum + (row.amount || 0), 0);
 }
@@ -916,7 +954,58 @@ function fillTable(tbody, rows, colspan, message, renderRow) {
   tbody.innerHTML = rows.map(renderRow).join("");
 }
 
-function renderLineList(list, rows, emptyText) {
+function saleItem(sale) {
+  return state.items.find((item) => item.id === sale.itemId)
+    || state.items.find((item) => item.name === sale.itemName)
+    || null;
+}
+
+function monthBucket(key) {
+  const sales = salesList().filter((sale) => monthKey(sale.at) === key);
+  const totals = salesTotals(sales);
+  const units = sales.reduce((sum, sale) => sum + sale.quantity, 0);
+  return { units, revenue: totals.revenue, profit: totals.profit };
+}
+
+function monthKeys() {
+  const current = monthKeyFromDate(new Date());
+  const keys = new Set([current, shiftMonth(current, -1)]);
+  for (const sale of salesList()) {
+    const key = monthKey(sale.at);
+    if (key) keys.add(key);
+  }
+  return [...keys].sort((a, b) => b.localeCompare(a)).slice(0, 12);
+}
+
+function changeCell(current, previous) {
+  const diff = current - previous;
+  if (diff === 0) return `<td class="num" data-label="Vs prior">Even</td>`;
+  const sign = diff > 0 ? "+" : "−";
+  const pct = previous > 0 ? ` · ${sign}${Math.abs(Math.round((diff / previous) * 100))}%` : "";
+  const cls = diff < 0 ? "num neg" : "num";
+  return `<td class="${cls}" data-label="Vs prior">${sign}${money(Math.abs(diff))}${pct}</td>`;
+}
+
+function rankGroups(keyOf, labelOf) {
+  const groups = new Map();
+  for (const sale of salesList()) {
+    const key = keyOf(sale);
+    let row = groups.get(key);
+    if (!row) {
+      row = { label: labelOf(sale), units: 0, revenue: 0, profit: 0 };
+      groups.set(key, row);
+    }
+    row.label = labelOf(sale);
+    row.units += sale.quantity;
+    row.revenue += saleTotal(sale);
+    row.profit += sale.profit || 0;
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.units - a.units || b.revenue - a.revenue || a.label.localeCompare(b.label))
+    .slice(0, 5);
+}
+
+function renderRank(list, rows, emptyText) {
   list.replaceChildren();
   if (rows.length === 0) {
     const item = document.createElement("li");
@@ -927,20 +1016,65 @@ function renderLineList(list, rows, emptyText) {
   }
   for (const row of rows) {
     const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "line-btn";
-    button.dataset.goto = row.tab;
-    button.textContent = row.text;
-    item.append(button);
-    if (row.aside) {
-      const aside = document.createElement("span");
-      aside.className = "aside";
-      aside.textContent = row.aside;
-      item.append(aside);
-    }
+    const text = document.createElement("p");
+    text.textContent = row.label;
+    const meta = document.createElement("span");
+    meta.className = "category";
+    meta.textContent = `${row.units} sold · ${money(row.profit)} profit`;
+    text.append(meta);
+    const aside = document.createElement("span");
+    aside.className = "aside";
+    aside.textContent = money(row.revenue);
+    item.append(text, aside);
     list.append(item);
   }
+}
+
+function averageHold() {
+  const groups = new Map();
+  const movements = state.movements
+    .filter((movement) => movement.type === "buy" || movement.type === "sell")
+    .slice()
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)) || String(a.id).localeCompare(String(b.id)));
+  for (const movement of movements) {
+    const key = movement.itemId || movement.itemName;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(movement);
+  }
+  let weighted = 0;
+  let units = 0;
+  let unmatched = 0;
+  for (const list of groups.values()) {
+    const lots = [];
+    for (const movement of list) {
+      if (movement.type === "buy") {
+        if (movement.quantity > 0) lots.push({ at: movement.at, left: movement.quantity });
+        continue;
+      }
+      let need = movement.quantity;
+      while (need > 0 && lots.length > 0) {
+        const lot = lots[0];
+        const days = calendarDaysBetween(lot.at, movement.at);
+        if (days == null || days < 0) break;
+        const take = Math.min(need, lot.left);
+        weighted += days * take;
+        units += take;
+        need -= take;
+        lot.left -= take;
+        if (lot.left <= 0) lots.shift();
+      }
+      unmatched += Math.max(0, need);
+    }
+  }
+  return { days: units > 0 ? weighted / units : null, units, unmatched };
+}
+
+function holdNote(hold) {
+  if (hold.days == null) return "No sale has an earlier purchase to measure.";
+  const measured = `${hold.units} ${hold.units === 1 ? "unit" : "units"} measured from the oldest purchase still unsold.`;
+  if (!hold.unmatched) return measured;
+  const skipped = `${hold.unmatched} ${hold.unmatched === 1 ? "unit" : "units"} had no earlier purchase.`;
+  return `${measured} ${skipped}`;
 }
 
 function renderDashboard() {
@@ -959,35 +1093,36 @@ function renderDashboard() {
   $("#dash-reprice").textContent = String(reprice.length);
   $("#dashStock").textContent = `${summary.quantity} on hand · ${money(summary.cost)} total cost`;
 
-  const attention = [];
-  for (const item of state.items) {
-    if (needsReprice(item)) attention.push({ text: `${item.name} lists at or below cost`, tab: "inventory" });
-    const status = statusOf(item);
-    if (status === "low") attention.push({ text: `${item.name} is low · ${item.quantity} on hand`, tab: "inventory" });
-    if (status === "out") attention.push({ text: `${item.name} is out of stock`, tab: "inventory" });
-  }
-  for (const sale of [...sales].reverse()) {
-    if (!isPending(sale)) continue;
-    attention.push({
-      text: `${sale.itemName} · ${money(saleTotal(sale))} · ${sale.terms.toUpperCase()}`,
-      tab: "sales",
-    });
-  }
-  const bills = [...state.upcoming].sort((a, b) => a.date.localeCompare(b.date));
-  for (const bill of bills) {
-    const days = daysUntil(bill.date);
-    if (days > 14) continue;
-    const when = days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? "due today" : `due in ${days} days`;
-    attention.push({ text: `${bill.name} · ${money(bill.amount)} · ${when}`, tab: "upcoming" });
-  }
-  renderLineList($("#dashAttention"), attention, "Nothing needs attention.");
+  const nowKey = monthKeyFromDate(new Date());
+  $("#dashMonths").innerHTML = monthKeys().map((key) => {
+    const row = monthBucket(key);
+    const prior = monthBucket(shiftMonth(key, -1));
+    const now = key === nowKey ? ` <span class="flag">Now</span>` : "";
+    return `<tr>
+      <td data-label=""><span>${esc(monthLabel(key))}${now}</span></td>
+      <td class="num" data-label="Sold">${row.units}</td>
+      <td class="num" data-label="Revenue">${money(row.revenue)}</td>
+      <td class="num${row.profit < 0 ? " neg" : ""}" data-label="Profit">${money(row.profit)}</td>
+      ${changeCell(row.revenue, prior.revenue)}
+    </tr>`;
+  }).join("");
 
-  const recent = salesList().slice(-4).reverse().map((sale) => ({
-    text: `Sold ${sale.quantity} × ${sale.itemName}${isPending(sale) ? ` · ${sale.terms.toUpperCase()}` : ""}`,
-    aside: money(sale.profit || 0),
-    tab: "sales",
-  }));
-  renderLineList($("#dashSales"), recent, "No sales yet.");
+  renderRank($("#dashCategories"), rankGroups(
+    (sale) => saleCategory(sale),
+    (sale) => saleCategory(sale),
+  ), "No sales yet.");
+  renderRank($("#dashItems"), rankGroups(
+    (sale) => sale.itemId || sale.itemName,
+    (sale) => saleItem(sale)?.name || sale.itemName,
+  ), "No sales yet.");
+
+  const hold = averageHold();
+  $("#dashDelta").textContent = formatDays(hold.days);
+  $("#dashDeltaNote").textContent = holdNote(hold);
+}
+
+function saleCategory(sale) {
+  return saleItem(sale)?.category || "General";
 }
 
 function renderSales() {
@@ -1690,11 +1825,6 @@ function bind() {
   $("#recordRemove").addEventListener("click", removeRecord);
 
   document.body.addEventListener("click", (event) => {
-    const destination = event.target.closest("[data-goto]");
-    if (destination) {
-      location.hash = destination.dataset.goto;
-      return;
-    }
     const paid = event.target.closest("[data-paid]");
     if (paid) {
       markPaid(paid.dataset.paid);
