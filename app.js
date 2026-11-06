@@ -524,6 +524,8 @@ let saveDone = Promise.resolve();
 const ui = { query: "", filter: "all", sort: "name", dir: "asc", flashId: null, tab: currentTab() };
 let editingId = null;
 let tradeId = null;
+let editingSaleId = null;
+let saleDeleteArmedId = null;
 let removeArmed = false;
 let deleteArmedId = null;
 let recordKind = "expense";
@@ -890,6 +892,36 @@ function movementText(movement) {
   return `Recounted ${movement.itemName} to ${movement.quantity}`;
 }
 
+function movementItem(movement) {
+  return itemById(movement.itemId) || state.items.find((item) => item.name === movement.itemName) || null;
+}
+
+function movementActions(item) {
+  const wrap = document.createElement("div");
+  wrap.className = "row-actions";
+  const waiting = pendingSales(item).reduce((sum, sale) => sum + saleTotal(sale), 0);
+  if (waiting > 0) {
+    const credit = document.createElement("button");
+    credit.type = "button";
+    credit.className = "credit-act";
+    credit.dataset.action = "credit";
+    credit.dataset.id = item.id;
+    credit.textContent = `Credit ${money(waiting)}`;
+    credit.setAttribute("aria-label", `Credit ${money(waiting)} for ${item.name}`);
+    wrap.append(credit);
+  }
+  const sell = document.createElement("button");
+  sell.type = "button";
+  sell.className = "sell-act";
+  sell.dataset.action = "sell";
+  sell.dataset.id = item.id;
+  sell.disabled = item.quantity < 1;
+  sell.innerHTML = `${ICON_CHECK}<span>Sell</span>`;
+  sell.setAttribute("aria-label", `Sell ${item.name}`);
+  wrap.append(sell);
+  return wrap;
+}
+
 function renderMovements() {
   const changes = state.movements.filter((movement) => movement.type !== "sell");
   const latest = changes.slice(-8).reverse();
@@ -909,10 +941,15 @@ function renderMovements() {
     const item = document.createElement("li");
     const text = document.createElement("p");
     text.textContent = movementText(movement);
+    const side = document.createElement("div");
+    side.className = "change-side";
+    const stock = movementItem(movement);
+    if (stock) side.append(movementActions(stock));
     const time = document.createElement("time");
     time.dateTime = movement.at;
     time.textContent = formatWhen(movement.at);
-    item.append(text, time);
+    side.append(time);
+    item.append(text, side);
     list.append(item);
   }
 }
@@ -1161,20 +1198,28 @@ function renderSales() {
   const message = salesList().length === 0
     ? "No sales yet. Record one from Inventory."
     : "Nothing in this view.";
-  fillTable($("#saleRows"), matched, 6, message, (sale) => {
+  fillTable($("#saleRows"), matched, 7, message, (sale) => {
     const total = saleTotal(sale);
     const profit = sale.profit || 0;
     const pending = isPending(sale);
     const payment = pending
       ? `<span class="flag">COP/COD</span> <button type="button" class="texty" data-received="${esc(sale.id)}">Credit</button>`
       : "Cash/Bank Transfer";
+    const name = esc(sale.itemName);
+    const armed = saleDeleteArmedId === sale.id;
     return `<tr>
       <td data-label="Date"><span><time datetime="${esc(sale.at)}">${esc(formatWhen(sale.at))}</time></span></td>
-      <td class="item" data-label="">${esc(sale.itemName)}</td>
+      <td class="item" data-label="">${name}</td>
       <td class="num" data-label="Qty">${sale.quantity}</td>
       <td class="num" data-label="Total">${money(total)}</td>
       <td class="num${profit < 0 ? " neg" : ""}" data-label="Profit">${money(profit)}</td>
       <td data-label="Payment">${payment}</td>
+      <td class="actions" data-label="">
+        <div class="row-actions">
+          <button type="button" class="icon-act" data-sale="edit" data-id="${esc(sale.id)}" aria-label="Edit sale of ${name}">${ICON_PENCIL}</button>
+          <button type="button" class="icon-act${armed ? " armed" : ""}" data-sale="delete" data-id="${esc(sale.id)}" aria-label="${armed ? `Confirm remove sale of ${name}` : `Remove sale of ${name}`}">${ICON_TRASH}</button>
+        </div>
+      </td>
     </tr>`;
   });
 }
@@ -1459,10 +1504,16 @@ function removeItem() {
   $("#itemDialog").close();
 }
 
+function editingSale() {
+  if (!editingSaleId) return null;
+  return state.movements.find((movement) => movement.id === editingSaleId && movement.type === "sell") || null;
+}
+
 function updateSellPreview() {
   const item = itemById(tradeId);
+  const sale = editingSale();
   const preview = $("#sellPreview");
-  if (!item) return;
+  if (!item && !sale) return;
   const form = $("#sellForm");
   const quantity = Math.max(0, int(form.quantity.value));
   const unitPrice = Math.max(0, cents(form.price.value || 0));
@@ -1471,22 +1522,33 @@ function updateSellPreview() {
     preview.classList.remove("neg");
     return;
   }
-  const profit = (unitPrice - item.cost) * quantity;
+  const unitCost = sale ? (sale.unitCost || 0) : item.cost;
+  const profit = (unitPrice - unitCost) * quantity;
   const waiting = form.terms.value === "cop" ? " · COP/COD pending" : "";
   preview.textContent = `${money(profit)} profit${waiting}`;
   preview.classList.toggle("neg", profit < 0);
 }
 
-function validateSell(form, item) {
+function validateSell(form) {
   const quantity = int(form.quantity.value);
+  const max = int(form.quantity.max);
   if (quantity < 1) form.quantity.setCustomValidity("Enter a quantity of at least 1.");
-  else if (quantity > item.quantity) form.quantity.setCustomValidity(`Only ${item.quantity} on hand.`);
+  else if (quantity > max) form.quantity.setCustomValidity(`Only ${max} available.`);
   else form.quantity.setCustomValidity("");
+}
+
+function showSellDialog(form) {
+  updateSellPreview();
+  rememberFocus();
+  $("#sellDialog").showModal();
+  form.quantity.focus();
+  form.quantity.select();
 }
 
 function openSell(id) {
   const item = itemById(id);
   if (!item || item.quantity < 1) return;
+  editingSaleId = null;
   tradeId = item.id;
   const form = $("#sellForm");
   form.reset();
@@ -1496,19 +1558,81 @@ function openSell(id) {
   form.price.value = (item.price / 100).toFixed(2);
   $("#sellHeading").textContent = item.name;
   $("#sellMeta").textContent = `${item.quantity} on hand · cost ${money(item.cost)}`;
-  updateSellPreview();
-  rememberFocus();
-  $("#sellDialog").showModal();
-  form.quantity.focus();
-  form.quantity.select();
+  $("#sellSubmit").textContent = "Record sale";
+  showSellDialog(form);
+}
+
+function openSaleEdit(id) {
+  const sale = state.movements.find((movement) => movement.id === id && movement.type === "sell");
+  if (!sale) return;
+  const item = movementItem(sale);
+  editingSaleId = sale.id;
+  tradeId = item ? item.id : "";
+  const form = $("#sellForm");
+  form.reset();
+  const available = item ? item.quantity + sale.quantity : sale.quantity;
+  form.quantity.max = String(available);
+  form.quantity.value = String(sale.quantity);
+  form.quantity.setCustomValidity("");
+  form.price.value = ((sale.unitPrice || 0) / 100).toFixed(2);
+  form.terms.value = isPending(sale) ? "cop" : "paid";
+  $("#sellHeading").textContent = sale.itemName;
+  $("#sellMeta").textContent = item
+    ? `${item.quantity} on hand · recorded cost ${money(sale.unitCost || 0)}`
+    : "This item is no longer in inventory.";
+  $("#sellSubmit").textContent = "Save sale";
+  showSellDialog(form);
+}
+
+function saveSaleEdit(form, sale) {
+  validateSell(form);
+  if (!form.reportValidity()) return;
+  const item = itemById(tradeId);
+  const quantity = int(form.quantity.value);
+  const unitPrice = Math.max(0, cents(form.price.value));
+  const unitCost = sale.unitCost == null ? (item ? item.cost : 0) : sale.unitCost;
+  if (item) item.quantity -= quantity - sale.quantity;
+  sale.quantity = quantity;
+  sale.unitCost = unitCost;
+  sale.unitPrice = unitPrice;
+  sale.profit = (unitPrice - unitCost) * quantity;
+  if (form.terms.value === "cop") sale.terms = "cop";
+  else delete sale.terms;
+  editingSaleId = null;
+  notify(`Updated sale of ${sale.itemName}.`);
+  save();
+  render();
+  $("#sellDialog").close();
+}
+
+function deleteSale(id) {
+  if (saleDeleteArmedId !== id) {
+    saleDeleteArmedId = id;
+    render();
+    return;
+  }
+  const sale = state.movements.find((movement) => movement.id === id && movement.type === "sell");
+  if (!sale) return;
+  const item = movementItem(sale);
+  if (item) item.quantity += sale.quantity;
+  state.movements = state.movements.filter((movement) => movement.id !== id);
+  saleDeleteArmedId = null;
+  notify(`Removed sale of ${sale.itemName}.`);
+  save();
+  render();
 }
 
 function onSellSubmit(event) {
   event.preventDefault();
+  const form = event.currentTarget;
+  const sale = editingSale();
+  if (sale) {
+    saveSaleEdit(form, sale);
+    return;
+  }
   const item = itemById(tradeId);
   if (!item) return;
-  const form = event.currentTarget;
-  validateSell(form, item);
+  validateSell(form);
   if (!form.reportValidity()) return;
 
   const quantity = int(form.quantity.value);
@@ -1855,7 +1979,7 @@ function bind() {
     render();
   });
 
-  $("#rows").addEventListener("click", (event) => {
+  $("#panel-inventory").addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button || button.disabled) return;
     const { id, action } = button.dataset;
@@ -1885,6 +2009,20 @@ function bind() {
     updateItemPreview();
   });
   $("#removeBtn").addEventListener("click", removeItem);
+
+  $("#saleRows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-sale]");
+    if (!button) return;
+    const { id, sale } = button.dataset;
+    if (sale === "delete") {
+      deleteSale(id);
+      return;
+    }
+    const wasArmed = saleDeleteArmedId != null;
+    saleDeleteArmedId = null;
+    if (wasArmed) render();
+    if (sale === "edit") openSaleEdit(id);
+  });
 
   $("#sellForm").addEventListener("submit", onSellSubmit);
   $("#sellForm").addEventListener("input", (event) => {

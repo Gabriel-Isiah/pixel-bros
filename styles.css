@@ -628,9 +628,17 @@ td.empty,
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  align-items: baseline;
+  align-items: center;
   padding: 12px 0;
   border-top: 1px solid var(--line);
+}
+
+.change-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  flex: none;
 }
 
 .ledger li p { margin: 0; }
