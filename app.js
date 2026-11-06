@@ -876,7 +876,7 @@ function renderRows() {
 function movementText(movement) {
   const each = movement.quantity > 1 ? " each" : "";
   if (movement.type === "sell") {
-    const pending = isPending(movement) ? ` · ${movement.terms.toUpperCase()} pending` : "";
+    const pending = isPending(movement) ? " · COP/COD pending" : "";
     return `Sold ${movement.quantity} × ${movement.itemName} at ${money(movement.unitPrice)} · profit ${money(movement.profit)}${pending}`;
   }
   if (movement.type === "buy") {
@@ -1152,8 +1152,8 @@ function renderSales() {
     const profit = sale.profit || 0;
     const pending = isPending(sale);
     const payment = pending
-      ? `<span class="flag">${esc(sale.terms.toUpperCase())}</span> <button type="button" class="texty" data-received="${esc(sale.id)}">Received</button>`
-      : "Paid";
+      ? `<span class="flag">COP/COD</span> <button type="button" class="texty" data-received="${esc(sale.id)}">Received</button>`
+      : "Cash/Bank Transfer";
     return `<tr>
       <td data-label="Date"><span><time datetime="${esc(sale.at)}">${esc(formatWhen(sale.at))}</time></span></td>
       <td class="item" data-label="">${esc(sale.itemName)}</td>
@@ -1458,8 +1458,7 @@ function updateSellPreview() {
     return;
   }
   const profit = (unitPrice - item.cost) * quantity;
-  const terms = form.terms.value;
-  const waiting = terms === "cop" || terms === "cod" ? ` · ${terms.toUpperCase()} pending` : "";
+  const waiting = form.terms.value === "cop" ? " · COP/COD pending" : "";
   preview.textContent = `${money(profit)} profit${waiting}`;
   preview.classList.toggle("neg", profit < 0);
 }
@@ -1501,7 +1500,7 @@ function onSellSubmit(event) {
   const quantity = int(form.quantity.value);
   const unitPrice = Math.max(0, cents(form.price.value));
   const profit = (unitPrice - item.cost) * quantity;
-  const terms = form.terms.value === "cop" || form.terms.value === "cod" ? form.terms.value : "paid";
+  const terms = form.terms.value === "cop" ? "cop" : "paid";
   item.quantity -= quantity;
   pushMovement({
     type: "sell",
@@ -1516,7 +1515,7 @@ function onSellSubmit(event) {
   flash(item.id);
   notify(terms === "paid"
     ? `Sold ${quantity} × ${item.name}.`
-    : `Sold ${quantity} × ${item.name} · ${terms.toUpperCase()} pending.`);
+    : `Sold ${quantity} × ${item.name} · COP/COD pending.`);
   save();
   render();
   $("#sellDialog").close();
