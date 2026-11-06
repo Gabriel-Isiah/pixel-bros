@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const KEY = "bns-inventory-v1";
 const IMPORTED = "bns-imported-v1";
+const FUNDS_KEY = "bns-funds-adjustment";
 const TABLES = ["items", "movements", "expenses", "upcoming", "investors"];
 
 const REMEMBER = "bns-remember";
@@ -363,11 +364,12 @@ function normalize(data) {
     expenses: Array.isArray(data.expenses) ? data.expenses.map(mapExpense).filter(Boolean) : null,
     upcoming: Array.isArray(data.upcoming) ? data.upcoming.map(mapExpense).filter(Boolean) : null,
     investors: Array.isArray(data.investors) ? data.investors.map(mapInvestor).filter(Boolean) : null,
+    fundsAdjustment: Math.round(Number(data.fundsAdjustment) || 0),
   };
 }
 
 function emptyLedger() {
-  return { items: [], movements: [], expenses: [], upcoming: [], investors: [] };
+  return { items: [], movements: [], expenses: [], upcoming: [], investors: [], fundsAdjustment: 0 };
 }
 
 function ledgerSignature(ledger) {
@@ -377,6 +379,7 @@ function ledgerSignature(ledger) {
     expenses: ledger.expenses || [],
     upcoming: ledger.upcoming || [],
     investors: ledger.investors || [],
+    fundsAdjustment: ledger.fundsAdjustment || 0,
   });
 }
 
@@ -555,6 +558,37 @@ async function writeLedger(id, ledger) {
   return errors.find(Boolean) || null;
 }
 
+function fundsStorageKey(id) {
+  return `${FUNDS_KEY}:${id}`;
+}
+
+function readStoredAdjustment(id) {
+  const value = Number(localStorage.getItem(fundsStorageKey(id)));
+  return Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+async function loadFundsAdjustment(id) {
+  const stored = readStoredAdjustment(id);
+  const result = await supabase.from("settings").select("funds_adjustment").eq("user_id", id).maybeSingle();
+  if (result.error || !result.data) return stored;
+  return Math.round(Number(result.data.funds_adjustment) || 0);
+}
+
+let fundsRemoteWarned = false;
+
+async function writeFundsAdjustment(id, amount) {
+  const value = Math.round(Number(amount) || 0);
+  localStorage.setItem(fundsStorageKey(id), String(value));
+  const result = await supabase.from("settings").upsert(
+    { user_id: id, funds_adjustment: value },
+    { onConflict: "user_id" },
+  );
+  if (result.error && value !== 0 && !fundsRemoteWarned) {
+    fundsRemoteWarned = true;
+    notify("Total funds are kept in this browser. Run the settings table in supabase/schema.sql to save them with the account.");
+  }
+}
+
 function save() {
   if (!userId) return false;
   dirty = true;
@@ -576,6 +610,7 @@ async function flush() {
         notify(`Could not save. ${error.message}`);
         break;
       }
+      await writeFundsAdjustment(id, snapshot.fundsAdjustment || 0);
     }
   } finally {
     saving = false;
@@ -679,6 +714,7 @@ async function openLedger(session) {
     if (token !== loadToken) return;
     ledger = await maybeImportLocal(id, ledger);
     if (token !== loadToken) return;
+    ledger.fundsAdjustment = await loadFundsAdjustment(id);
     userId = id;
     state = ledger;
     showApp();
@@ -1006,6 +1042,22 @@ function purchaseSpend() {
   }, 0);
 }
 
+function computedFunds() {
+  const collected = salesTotals(salesList().filter((sale) => !isPending(sale)));
+  return sumAmount(state.investors) + collected.revenue - purchaseSpend() - sumAmount(state.expenses);
+}
+
+function totalFunds() {
+  return computedFunds() + (state.fundsAdjustment || 0);
+}
+
+function fundsChangeNote(before) {
+  const delta = totalFunds() - before;
+  if (!delta) return "";
+  const sign = delta > 0 ? "+" : "−";
+  return ` Total funds ${sign}${money(Math.abs(delta))}.`;
+}
+
 function fillTable(tbody, rows, colspan, message, renderRow) {
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td class="empty" colspan="${colspan}">${message}</td></tr>`;
@@ -1140,9 +1192,8 @@ function holdNote(hold) {
 function renderDashboard() {
   const summary = stats();
   const sales = salesList();
-  const collected = salesTotals(sales.filter((sale) => !isPending(sale)));
   const pending = sales.filter(isPending).reduce((sum, sale) => sum + saleTotal(sale), 0);
-  const funds = sumAmount(state.investors) + collected.revenue - purchaseSpend() - sumAmount(state.expenses);
+  const funds = totalFunds();
   const reprice = state.items.filter(needsReprice);
 
   const fundsEl = $("#dash-funds");
@@ -1591,6 +1642,7 @@ function saveSaleEdit(form, sale) {
   const quantity = int(form.quantity.value);
   const unitPrice = Math.max(0, cents(form.price.value));
   const unitCost = sale.unitCost == null ? (item ? item.cost : 0) : sale.unitCost;
+  const before = totalFunds();
   if (item) item.quantity -= quantity - sale.quantity;
   sale.quantity = quantity;
   sale.unitCost = unitCost;
@@ -1599,7 +1651,7 @@ function saveSaleEdit(form, sale) {
   if (form.terms.value === "cop") sale.terms = "cop";
   else delete sale.terms;
   editingSaleId = null;
-  notify(`Updated sale of ${sale.itemName}.`);
+  notify(`Updated sale of ${sale.itemName}.${fundsChangeNote(before)}`);
   save();
   render();
   $("#sellDialog").close();
@@ -1613,13 +1665,33 @@ function deleteSale(id) {
   }
   const sale = state.movements.find((movement) => movement.id === id && movement.type === "sell");
   if (!sale) return;
+  const before = totalFunds();
   const item = movementItem(sale);
   if (item) item.quantity += sale.quantity;
   state.movements = state.movements.filter((movement) => movement.id !== id);
   saleDeleteArmedId = null;
-  notify(`Removed sale of ${sale.itemName}.`);
+  notify(`Removed sale of ${sale.itemName}.${fundsChangeNote(before)}`);
   save();
   render();
+}
+
+function openFundsDialog() {
+  const form = $("#fundsForm");
+  form.amount.value = (totalFunds() / 100).toFixed(2);
+  rememberFocus();
+  $("#fundsDialog").showModal();
+  form.amount.focus();
+  form.amount.select();
+}
+
+function onFundsSubmit(event) {
+  event.preventDefault();
+  const next = cents(event.currentTarget.amount.value);
+  state.fundsAdjustment = next - computedFunds();
+  notify(`Total funds set to ${money(next)}.`);
+  save();
+  render();
+  $("#fundsDialog").close();
 }
 
 function onSellSubmit(event) {
@@ -1978,6 +2050,9 @@ function bind() {
     }
     render();
   });
+
+  $("#dash-funds").addEventListener("click", openFundsDialog);
+  $("#fundsForm").addEventListener("submit", onFundsSubmit);
 
   $("#panel-inventory").addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");

@@ -345,6 +345,28 @@ th button,
   font-variant-numeric: tabular-nums;
 }
 
+.figure-edit {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  font-variant-numeric: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.figure-edit:hover,
+.figure-edit:focus-visible {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--gold);
+  text-underline-offset: 0.16em;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -524,7 +546,8 @@ tr.flash td { animation: rowflash 1.2s ease; }
 .flag.out { color: var(--muted); }
 
 td.neg,
-dd.neg { color: var(--gold-ink); }
+dd.neg,
+.figure-edit.neg { color: var(--gold-ink); }
 
 .actions {
   text-align: right;

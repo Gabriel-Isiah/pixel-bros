@@ -108,3 +108,19 @@ grant select, insert, update, delete on public.movements to authenticated;
 grant select, insert, update, delete on public.expenses to authenticated;
 grant select, insert, update, delete on public.upcoming to authenticated;
 grant select, insert, update, delete on public.investors to authenticated;
+
+create table if not exists public.settings (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  funds_adjustment integer not null default 0
+);
+
+alter table public.settings enable row level security;
+
+drop policy if exists "own rows" on public.settings;
+
+create policy "own rows" on public.settings
+  for all to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+grant select, insert, update, delete on public.settings to authenticated;

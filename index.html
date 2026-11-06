@@ -71,8 +71,8 @@
     <section id="panel-dashboard" class="panel" role="tabpanel" aria-labelledby="tab-dashboard">
       <dl class="stats" aria-label="Business summary">
         <div>
-          <dt title="Investor capital plus collected sales, minus stock purchases and expenses">Total funds</dt>
-          <dd id="dash-funds">₱0.00</dd>
+          <dt title="Investor capital plus collected sales, minus stock purchases and expenses. Click the amount to set it.">Total funds</dt>
+          <dd><button type="button" id="dash-funds" class="figure-edit">₱0.00</button></dd>
         </div>
         <div>
           <dt title="COP/COD sales waiting to be credited">Pending COP/COD</dt>
@@ -492,6 +492,31 @@
         </div>
       </div>
       <datalist id="recordCategories"></datalist>
+    </form>
+  </dialog>
+
+  <dialog id="fundsDialog" aria-labelledby="fundsHeading">
+    <form id="fundsForm" class="sheet" autocomplete="off">
+      <div class="sheet-head">
+        <div>
+          <p class="eyebrow">Dashboard</p>
+          <h2 id="fundsHeading">Total funds</h2>
+        </div>
+        <button type="button" class="icon-close" data-close aria-label="Close"><span aria-hidden="true">×</span></button>
+      </div>
+      <div class="fields">
+        <label class="wide">
+          <span>Amount</span>
+          <input name="amount" type="number" step="0.01" inputmode="decimal" required>
+        </label>
+      </div>
+      <p class="hint">Collected sales add to this balance. Removing one takes that amount back out. Purchases and expenses come out of it too.</p>
+      <div class="sheet-actions end">
+        <div class="cluster">
+          <button type="button" class="quiet" data-close>Cancel</button>
+          <button type="submit" class="primary">Save funds</button>
+        </div>
+      </div>
     </form>
   </dialog>
 
