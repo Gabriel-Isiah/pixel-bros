@@ -1,6 +1,6 @@
 -- Run this once in the Supabase SQL editor.
--- Then, in Authentication, allow email sign-ins. Turn off "Confirm email"
--- if you want a new account to open the ledger immediately.
+-- Sign-in uses a username. In Authentication, turn off "Confirm email"
+-- so a new account can open the ledger immediately.
 
 create table if not exists public.items (
   user_id uuid not null references auth.users (id) on delete cascade,

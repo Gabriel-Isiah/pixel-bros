@@ -21,12 +21,16 @@
       <p id="authMessage" class="hint"></p>
       <form id="authForm" class="fields" autocomplete="on">
         <label>
-          <span>Email</span>
-          <input name="email" type="email" required autocomplete="username">
+          <span>Username</span>
+          <input name="username" type="text" required minlength="2" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false">
         </label>
         <label>
           <span>Password</span>
           <input name="password" type="password" required minlength="6" autocomplete="current-password">
+        </label>
+        <label class="remember">
+          <input name="remember" type="checkbox" checked>
+          <span>Remember me</span>
         </label>
         <div class="sheet-actions end">
           <button type="submit" class="primary" id="authSubmit">Sign in</button>

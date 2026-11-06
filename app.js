@@ -4,10 +4,43 @@ const KEY = "bns-inventory-v1";
 const IMPORTED = "bns-imported-v1";
 const TABLES = ["items", "movements", "expenses", "upcoming", "investors"];
 
+const REMEMBER = "bns-remember";
+const USER_DOMAIN = "users.pixelbros.local";
+
 const supabaseKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
 const secretKey = supabaseKey.startsWith("sb_secret_");
-const supabase = supabaseUrl && supabaseKey && !secretKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+function remembered() {
+  return localStorage.getItem(REMEMBER) !== "0";
+}
+
+const authStorage = {
+  getItem(key) {
+    return (remembered() ? localStorage : sessionStorage).getItem(key);
+  },
+  setItem(key, value) {
+    const keep = remembered() ? localStorage : sessionStorage;
+    const drop = remembered() ? sessionStorage : localStorage;
+    drop.removeItem(key);
+    keep.setItem(key, value);
+  },
+  removeItem(key) {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  },
+};
+
+const supabase = supabaseUrl && supabaseKey && !secretKey
+  ? createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: authStorage,
+    },
+  })
+  : null;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -569,12 +602,7 @@ function showAuth() {
   $("#boot").hidden = true;
   $("#auth").hidden = false;
   $("#app").hidden = true;
-}
-
-function showApp() {
-  $("#boot").hidden = true;
-  $("#auth").hidden = true;
-  $("#app").hidden = false;
+  $("#authForm").remember.checked = remembered();
 }
 
 function setAuthMode(mode) {
@@ -585,6 +613,18 @@ function setAuthMode(mode) {
   $("#authSwitch").textContent = signIn ? "Create an account" : "Already have an account? Sign in";
   $("#authMessage").textContent = "";
   $("#authForm").password.autocomplete = signIn ? "current-password" : "new-password";
+}
+
+function accountEmail(username) {
+  const name = username.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{1,31}$/.test(name)) return "";
+  return `${name}@${USER_DOMAIN}`;
+}
+
+function showApp() {
+  $("#boot").hidden = true;
+  $("#auth").hidden = true;
+  $("#app").hidden = false;
 }
 
 async function openLedger(session) {
@@ -1525,13 +1565,23 @@ function markPaid(id) {
 async function onAuthSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const email = form.email.value.trim();
+  const username = form.username.value.trim();
+  const email = accountEmail(username);
   const password = form.password.value;
+  if (!email) {
+    $("#authMessage").textContent = "Use 2–32 letters, numbers, dots, or dashes.";
+    return;
+  }
+  localStorage.setItem(REMEMBER, form.remember.checked ? "1" : "0");
   $("#authSubmit").disabled = true;
   $("#authMessage").textContent = "";
   const result = authMode === "sign-in"
     ? await supabase.auth.signInWithPassword({ email, password })
-    : await supabase.auth.signUp({ email, password });
+    : await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { username: username.toLowerCase() } },
+    });
   $("#authSubmit").disabled = false;
   if (result.error) {
     $("#authMessage").textContent = result.error.message;
@@ -1539,8 +1589,8 @@ async function onAuthSubmit(event) {
   }
   if (authMode === "sign-up" && !result.data.session) {
     setAuthMode("sign-in");
-    form.email.value = email;
-    $("#authMessage").textContent = "Check your email to confirm the account, then sign in.";
+    form.username.value = username;
+    $("#authMessage").textContent = "Account created. Turn off email confirmation in Supabase, then sign in.";
   }
 }
 
