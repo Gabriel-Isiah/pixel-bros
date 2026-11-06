@@ -122,6 +122,23 @@ textarea:focus-visible {
   accent-color: var(--ink);
 }
 
+.secret { position: relative; }
+
+.secret input { padding-right: 52px; }
+
+.peek {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.peek:hover { color: var(--ink); }
+
 .top-actions {
   display: flex;
   align-items: center;

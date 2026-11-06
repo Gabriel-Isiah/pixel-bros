@@ -21,12 +21,15 @@
       <p id="authMessage" class="hint"></p>
       <form id="authForm" class="fields" autocomplete="on">
         <label>
-          <span>Username</span>
-          <input name="username" type="text" required minlength="2" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false">
+          <span>Email</span>
+          <input name="email" type="email" required autocomplete="username" autocapitalize="none" spellcheck="false">
         </label>
         <label>
           <span>Password</span>
-          <input name="password" type="password" required minlength="6" autocomplete="current-password">
+          <div class="secret">
+            <input name="password" type="password" required minlength="6" autocomplete="current-password">
+            <button type="button" class="peek" id="peekPassword" aria-label="Show password" aria-pressed="false">Show</button>
+          </div>
         </label>
         <label class="remember">
           <input name="remember" type="checkbox" checked>
