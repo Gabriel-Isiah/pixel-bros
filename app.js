@@ -801,6 +801,10 @@ function rowHTML(item) {
   const id = esc(item.id);
   const name = esc(item.name);
   const armed = deleteArmedId === item.id;
+  const waiting = pendingSales(item).reduce((sum, sale) => sum + saleTotal(sale), 0);
+  const credit = waiting > 0
+    ? `<button type="button" class="credit-act" data-action="credit" data-id="${id}" aria-label="Credit ${money(waiting)} for ${name}">Credit ${money(waiting)}</button>`
+    : "";
 
   return `<tr data-id="${id}" class="${classes}">
     <td class="item" data-label="">
@@ -814,6 +818,7 @@ function rowHTML(item) {
     <td class="num${profit < 0 ? " neg" : ""}" data-label="Profit">${money(profit)}</td>
     <td class="actions" data-label="">
       <div class="row-actions">
+        ${credit}
         <button type="button" class="sell-act" data-action="sell" data-id="${id}" ${item.quantity < 1 ? "disabled" : ""} aria-label="Sell ${name}">${ICON_CHECK}<span>Sell</span></button>
         <button type="button" class="icon-act" data-action="edit" data-id="${id}" aria-label="Edit ${name}">${ICON_PENCIL}</button>
         <button type="button" class="icon-act${armed ? " armed" : ""}" data-action="delete" data-id="${id}" aria-label="${armed ? `Confirm delete ${name}` : `Delete ${name}`}">${ICON_TRASH}</button>
@@ -933,6 +938,15 @@ function salesList() {
 
 function isPending(sale) {
   return sale.terms === "cop" || sale.terms === "cod";
+}
+
+function saleMatchesItem(sale, item) {
+  if (sale.itemId) return sale.itemId === item.id;
+  return sale.itemName === item.name;
+}
+
+function pendingSales(item) {
+  return salesList().filter((sale) => isPending(sale) && saleMatchesItem(sale, item));
 }
 
 function saleTotal(sale) {
@@ -1152,7 +1166,7 @@ function renderSales() {
     const profit = sale.profit || 0;
     const pending = isPending(sale);
     const payment = pending
-      ? `<span class="flag">COP/COD</span> <button type="button" class="texty" data-received="${esc(sale.id)}">Received</button>`
+      ? `<span class="flag">COP/COD</span> <button type="button" class="texty" data-received="${esc(sale.id)}">Credit</button>`
       : "Cash/Bank Transfer";
     return `<tr>
       <td data-label="Date"><span><time datetime="${esc(sale.at)}">${esc(formatWhen(sale.at))}</time></span></td>
@@ -1709,13 +1723,26 @@ function removeRecord() {
   $("#recordDialog").close();
 }
 
+function creditSales(sales, label) {
+  const pending = sales.filter(isPending);
+  if (pending.length === 0) return;
+  const amount = pending.reduce((sum, sale) => sum + saleTotal(sale), 0);
+  for (const sale of pending) delete sale.terms;
+  notify(`Credited ${money(amount)} for ${label}.`);
+  save();
+  render();
+}
+
+function creditItem(id) {
+  const item = itemById(id);
+  if (!item) return;
+  creditSales(pendingSales(item), item.name);
+}
+
 function markReceived(id) {
   const sale = state.movements.find((movement) => movement.id === id && movement.type === "sell");
   if (!sale || !isPending(sale)) return;
-  delete sale.terms;
-  notify(`Received payment for ${sale.itemName}.`);
-  save();
-  render();
+  creditSales([sale], sale.itemName);
 }
 
 function markPaid(id) {
@@ -1834,6 +1861,11 @@ function bind() {
     const { id, action } = button.dataset;
     if (action === "delete") {
       deleteItem(id);
+      return;
+    }
+    if (action === "credit") {
+      deleteArmedId = null;
+      creditItem(id);
       return;
     }
     const wasArmed = deleteArmedId != null;

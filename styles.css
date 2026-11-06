@@ -567,6 +567,17 @@ dd.neg { color: var(--gold-ink); }
 
 .sell-act:hover { background: #243c2e; }
 
+.credit-act {
+  border: 0;
+  background: var(--gold);
+  color: var(--ink);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.credit-act:hover { background: #c2a15e; }
+
 .sell-act:disabled {
   background: transparent;
   color: #8aa094;
