@@ -293,8 +293,29 @@ function seed() {
   return { items, movements, expenses, upcoming, investors };
 }
 
+const INSTALLMENT_TERMS = [1, 3, 6, 12];
+
+function installmentOf(row) {
+  if (!row || row.plan !== "installment") return null;
+  const term = INSTALLMENT_TERMS.includes(row.term) ? row.term : null;
+  if (!term) return null;
+  const month = Math.min(term, Math.max(1, int(row.month) || 1));
+  const left = term - month + 1;
+  return { term, month, left, monthly: row.amount, owed: row.amount * left };
+}
+
+function owed(row) {
+  return installmentOf(row)?.owed ?? row.amount;
+}
+
 function mapExpense(raw) {
   if (!raw || raw.id == null || !raw.name) return null;
+  const term = INSTALLMENT_TERMS.includes(int(raw.term)) ? int(raw.term) : null;
+  let month = int(raw.month);
+  const installment = raw.plan === "installment" && term;
+  if (!installment) month = null;
+  else if (month < 1) month = 1;
+  else if (month > term) month = term;
   return {
     id: String(raw.id),
     name: String(raw.name),
@@ -302,6 +323,9 @@ function mapExpense(raw) {
     amount: Math.max(0, Math.round(Number(raw.amount) || 0)),
     date: String(raw.date || "").slice(0, 10),
     notes: String(raw.notes || ""),
+    plan: installment ? "installment" : "straight",
+    term: installment ? term : null,
+    month,
   };
 }
 
@@ -458,10 +482,21 @@ function investorRow(row, userId) {
   };
 }
 
+function upcomingRow(row, userId) {
+  const plan = installmentOf(row);
+  return {
+    ...storedExpense(row, userId),
+    plan: plan ? "installment" : "straight",
+    term: plan ? plan.term : null,
+    month: plan ? plan.month : null,
+  };
+}
+
 function rowsFor(table, ledger, userId) {
   if (table === "items") return ledger.items.map((item) => itemRow(item, userId));
   if (table === "movements") return ledger.movements.map((movement) => movementRow(movement, userId));
   if (table === "investors") return ledger.investors.map((row) => investorRow(row, userId));
+  if (table === "upcoming") return ledger.upcoming.map((row) => upcomingRow(row, userId));
   return ledger[table].map((row) => storedExpense(row, userId));
 }
 
@@ -503,6 +538,7 @@ function fromRemote(table, rows) {
       notes: row.notes,
     }));
   }
+  if (table === "upcoming") return rows.map(mapExpense).filter(Boolean);
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -1552,7 +1588,7 @@ function renderDashboard() {
   fundsEl.textContent = money(funds);
   fundsEl.classList.toggle("neg", funds < 0);
   $("#dash-pending").textContent = money(pending);
-  $("#dash-upcoming").textContent = money(sumAmount(state.upcoming));
+  $("#dash-upcoming").textContent = money(state.upcoming.reduce((sum, row) => sum + owed(row), 0));
   $("#dash-reprice").textContent = String(reprice.length);
   $("#dashStock").textContent = `${summary.quantity} on hand · ${money(summary.cost)} total cost`;
 
@@ -1636,15 +1672,21 @@ function expenseRow(row, kind) {
   const flag = kind === "upcoming" ? dueFlag(row.date) : "";
   const overdue = flag === "Overdue";
   const flagHtml = flag ? `<span class="flag">${esc(flag)}</span>` : "";
+  const plan = kind === "upcoming" ? installmentOf(row) : null;
+  const detail = plan
+    ? `${row.category} · Installment · month ${plan.month} of ${plan.term} · ${money(plan.owed)} left`
+    : kind === "upcoming"
+      ? `${row.category} · Straight`
+      : row.category;
   const paid = kind === "upcoming"
-    ? `<button type="button" class="texty" data-paid="${esc(row.id)}">Mark paid</button><span class="dot" aria-hidden="true">·</span>`
+    ? `<button type="button" class="texty" data-paid="${esc(row.id)}">${plan ? `Pay month ${plan.month}` : "Pay"}</button><span class="dot" aria-hidden="true">·</span>`
     : "";
   return `<tr class="${overdue ? "is-low" : ""}">
     <td class="item" data-label="">
       <button type="button" class="item-name" data-record="${kind}" data-id="${esc(row.id)}">${esc(row.name)}</button>
-      <span class="category">${esc(row.category)}</span>
+      <span class="category">${esc(detail)}</span>
     </td>
-    <td data-label="${kind === "upcoming" ? "Due" : "Paid"}"><span>${esc(formatDay(row.date))} ${flagHtml}</span></td>
+    <td data-label="${kind === "upcoming" ? "Deadline" : "Paid"}"><span>${esc(formatDay(row.date))} ${flagHtml}</span></td>
     <td class="num" data-label="Amount">${money(row.amount)}</td>
     <td class="actions" data-label="">
       ${paid}
@@ -1670,7 +1712,7 @@ function renderExpenses() {
 function renderUpcoming() {
   const query = $("#upcomingSearch").value;
   const matched = state.upcoming
-    .filter((row) => textMatch(query, row.name, row.category, row.notes))
+    .filter((row) => textMatch(query, row.name, row.category, row.notes, row.plan))
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
   const source = query.trim() ? matched : state.upcoming;
@@ -1679,8 +1721,8 @@ function renderUpcoming() {
     return Number.isFinite(days) && days <= 30;
   });
   const next = [...source].sort((a, b) => a.date.localeCompare(b.date))[0];
-  $("#upcoming-total").textContent = money(sumAmount(source));
-  $("#upcoming-soon").textContent = money(sumAmount(soon));
+  $("#upcoming-total").textContent = money(source.reduce((sum, row) => sum + owed(row), 0));
+  $("#upcoming-soon").textContent = money(soon.reduce((sum, row) => sum + owed(row), 0));
   $("#upcoming-next").textContent = next ? formatDay(next.date) : "—";
   const message = state.upcoming.length === 0 ? "Nothing scheduled." : "Nothing in this view.";
   fillTable($("#upcomingRows"), matched, 4, message, (row) => expenseRow(row, "upcoming"));
@@ -2314,8 +2356,35 @@ function updateRecordPreview() {
     preview.textContent = share == null ? money(amount) : `${money(amount)} · ${share}% share`;
     return;
   }
+  if (recordKind === "upcoming" && form.plan.value === "installment") {
+    const term = INSTALLMENT_TERMS.includes(int(form.term.value)) ? int(form.term.value) : 1;
+    const month = Math.min(term, Math.max(1, int(form.month.value) || 1));
+    const left = amount * (term - month + 1);
+    const day = form.date.value ? formatDay(form.date.value) : "";
+    const due = day ? ` · due ${day}` : "";
+    preview.textContent = `${money(amount)} / month · month ${month} of ${term} · ${money(left)} left${due}`;
+    return;
+  }
   const day = form.date.value ? formatDay(form.date.value) : "";
   preview.textContent = day ? `${money(amount)} · ${day}` : money(amount);
+}
+
+function syncPlanFields() {
+  const form = $("#recordForm");
+  const upcoming = recordKind === "upcoming";
+  $("#field-plan").hidden = !upcoming;
+  const installment = upcoming && form.plan.value === "installment";
+  $("#field-term").hidden = !installment;
+  $("#field-month").hidden = !installment;
+  $("#amountLabel").textContent = installment ? "Monthly payment" : RECORD[recordKind].amount;
+  $("#dateLabel").textContent = upcoming ? "Deadline" : RECORD[recordKind].date;
+  if (!installment) return;
+  const term = INSTALLMENT_TERMS.includes(int(form.term.value)) ? int(form.term.value) : 3;
+  form.term.value = String(term);
+  form.month.max = String(term);
+  const month = int(form.month.value);
+  if (month > term) form.month.value = String(term);
+  if (month < 1) form.month.value = "1";
 }
 
 function openRecord(kind, id) {
@@ -2339,6 +2408,9 @@ function openRecord(kind, id) {
   $("#field-share").hidden = !meta.share;
   $("#amountLabel").textContent = meta.amount;
   $("#dateLabel").textContent = meta.date;
+  form.plan.value = "straight";
+  form.term.value = "3";
+  form.month.value = "1";
   if (existing) {
     form.name.value = existing.name;
     form.amount.value = (existing.amount / 100).toFixed(2);
@@ -2346,10 +2418,16 @@ function openRecord(kind, id) {
     form.notes.value = existing.notes || "";
     if (meta.category) form.category.value = existing.category || "";
     if (meta.share && existing.share != null) form.share.value = String(existing.share);
+    if (kind === "upcoming" && installmentOf(existing)) {
+      form.plan.value = "installment";
+      form.term.value = String(existing.term);
+      form.month.value = String(existing.month);
+    }
   } else {
     form.date.value = todayKey();
   }
   fillRecordCategories();
+  syncPlanFields();
   updateRecordPreview();
   rememberFocus();
   $("#recordDialog").showModal();
@@ -2374,6 +2452,21 @@ function onRecordSubmit(event) {
   };
   if (meta.category) draft.category = form.category.value.trim();
   if (meta.share) draft.share = readShare(form.share.value);
+  if (recordKind === "upcoming") {
+    const installment = form.plan.value === "installment";
+    const term = int(form.term.value);
+    const month = int(form.month.value);
+    if (installment && !INSTALLMENT_TERMS.includes(term)) {
+      form.term.setCustomValidity("Choose a term.");
+    } else form.term.setCustomValidity("");
+    if (installment && (month < 1 || month > term)) {
+      form.month.setCustomValidity(`Enter a month from 1 to ${term}.`);
+    } else form.month.setCustomValidity("");
+    if (!form.reportValidity()) return;
+    draft.plan = installment ? "installment" : "straight";
+    draft.term = installment ? term : null;
+    draft.month = installment ? month : null;
+  }
 
   const list = state[meta.list];
   if (recordId) {
@@ -2430,16 +2523,25 @@ function markReceived(id) {
 function markPaid(id) {
   const bill = state.upcoming.find((row) => row.id === id);
   if (!bill) return;
+  const plan = installmentOf(bill);
+  const note = plan
+    ? [bill.notes, `Month ${plan.month} of ${plan.term}`].filter(Boolean).join(" · ")
+    : bill.notes;
   state.expenses.push({
     id: uid(),
     name: bill.name,
     category: bill.category,
     amount: bill.amount,
     date: todayKey(),
-    notes: bill.notes,
+    notes: note,
   });
-  state.upcoming = state.upcoming.filter((row) => row.id !== id);
-  notify(`Paid ${bill.name}.`);
+  if (!plan || plan.month >= plan.term) {
+    state.upcoming = state.upcoming.filter((row) => row.id !== id);
+    notify(plan ? `Paid off ${bill.name}.` : `Paid ${bill.name}.`);
+  } else {
+    bill.month = plan.month + 1;
+    notify(`Paid month ${plan.month} of ${plan.term} for ${bill.name}.`);
+  }
   save();
   render();
 }
@@ -2692,10 +2794,17 @@ function bind() {
 
   $("#recordForm").addEventListener("submit", onRecordSubmit);
   $("#recordForm").addEventListener("input", (event) => {
-    if (event.target.name === "name" || event.target.name === "category" || event.target.name === "amount") {
+    if (event.target.name === "name" || event.target.name === "category" || event.target.name === "amount" || event.target.name === "month") {
       event.target.setCustomValidity("");
     }
     setRecordRemoveArmed(false);
+    if (event.target.name === "month") syncPlanFields();
+    updateRecordPreview();
+  });
+  $("#recordForm").addEventListener("change", (event) => {
+    if (event.target.name !== "plan" && event.target.name !== "term") return;
+    event.target.setCustomValidity("");
+    syncPlanFields();
     updateRecordPreview();
   });
   $("#recordRemove").addEventListener("click", removeRecord);

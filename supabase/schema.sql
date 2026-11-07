@@ -54,8 +54,27 @@ create table if not exists public.upcoming (
   amount integer not null default 0 check (amount >= 0),
   date date,
   notes text not null default '',
+  plan text not null default 'straight',
+  term integer,
+  month integer,
   primary key (user_id, id)
 );
+
+alter table public.upcoming add column if not exists plan text not null default 'straight';
+alter table public.upcoming add column if not exists term integer;
+alter table public.upcoming add column if not exists month integer;
+
+alter table public.upcoming drop constraint if exists upcoming_plan_check;
+alter table public.upcoming add constraint upcoming_plan_check
+  check (plan in ('straight', 'installment'));
+
+alter table public.upcoming drop constraint if exists upcoming_term_check;
+alter table public.upcoming add constraint upcoming_term_check
+  check (term is null or term in (1, 3, 6, 12));
+
+alter table public.upcoming drop constraint if exists upcoming_month_check;
+alter table public.upcoming add constraint upcoming_month_check
+  check (month is null or (month >= 1 and month <= 12));
 
 create table if not exists public.investors (
   user_id uuid not null references auth.users (id) on delete cascade,
