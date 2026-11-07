@@ -390,6 +390,63 @@ th button {
   font-variant-numeric: tabular-nums;
 }
 
+.pending-figure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  flex-wrap: wrap;
+}
+
+.credit-card {
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  padding: 9px 14px;
+}
+
+.credit-card:hover,
+.credit-card:focus-visible { background: #243c2e; }
+
+.credit-all {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  font-weight: 500;
+}
+
+.credit-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.credit-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.credit-list label span { display: block; }
+
+.credit-name { font-weight: 500; }
+
+.credit-meta {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .figure-edit {
   border: 0;
   background: transparent;
@@ -946,6 +1003,11 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
 
 .order-names span { display: block; }
 
+.order-names .delta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .order-dialog .terms { margin-top: 18px; }
 
 .terms {
@@ -968,8 +1030,11 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   font-size: 15px;
 }
 
-.term-options input {
+.term-options input,
+.sheet .credit-all input,
+.sheet .credit-list input {
   width: auto;
+  flex: 0 0 auto;
   margin: 0;
   padding: 0;
   border: 0;

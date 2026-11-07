@@ -82,7 +82,10 @@
         </div>
         <div>
           <dt title="COP/COD sales waiting to be credited">Pending COP/COD</dt>
-          <dd id="dash-pending">₱0.00</dd>
+          <dd class="pending-figure">
+            <span id="dash-pending">₱0.00</span>
+            <button type="button" class="credit-card" id="dash-credit" hidden>Credit</button>
+          </dd>
         </div>
         <div>
           <dt>Upcoming expenses</dt>
@@ -184,7 +187,7 @@
     <section id="panel-sales" class="panel" role="tabpanel" aria-labelledby="tab-sales" hidden>
       <dl class="stats" aria-label="Sales summary">
         <div>
-          <dt>Games sold this month</dt>
+          <dt>Items sold this month</dt>
           <dd id="sale-sold">0</dd>
         </div>
         <div>
@@ -197,7 +200,10 @@
         </div>
         <div>
           <dt title="COP/COD sales waiting to be credited">Pending COP/COD</dt>
-          <dd id="sale-pending">₱0.00</dd>
+          <dd class="pending-figure">
+            <span id="sale-pending">₱0.00</span>
+            <button type="button" class="credit-card" id="sale-credit" hidden>Credit</button>
+          </dd>
         </div>
       </dl>
       <div class="toolbar">
@@ -522,6 +528,31 @@
         </div>
       </div>
       <datalist id="recordCategories"></datalist>
+    </form>
+  </dialog>
+
+  <dialog id="creditDialog" aria-labelledby="creditHeading">
+    <form id="creditForm" class="sheet" autocomplete="off">
+      <div class="sheet-head">
+        <div>
+          <p class="eyebrow">COP/COD</p>
+          <h2 id="creditHeading">Credit pending games</h2>
+        </div>
+        <button type="button" class="icon-close" data-close aria-label="Close"><span aria-hidden="true">×</span></button>
+      </div>
+      <label class="credit-all" id="creditAllLabel">
+        <input type="checkbox" id="creditAll">
+        <span>All pending</span>
+      </label>
+      <ul id="creditList" class="credit-list"></ul>
+      <p id="creditEmpty" class="hint" hidden>Nothing is waiting to be credited.</p>
+      <p id="creditTotal" class="preview" aria-live="polite"></p>
+      <div class="sheet-actions end">
+        <div class="cluster">
+          <button type="button" class="quiet" data-close>Cancel</button>
+          <button type="submit" class="gold" id="creditSubmit">Credit selected</button>
+        </div>
+      </div>
     </form>
   </dialog>
 

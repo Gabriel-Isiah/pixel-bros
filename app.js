@@ -1319,7 +1319,7 @@ function renderBars(list, rows) {
   }
 }
 
-function averageHold(includeSale = () => true) {
+function eachHoldTake(onTake, onLeft) {
   const groups = new Map();
   const movements = state.movements
     .filter((movement) => movement.type === "buy" || movement.type === "sell")
@@ -1330,6 +1330,30 @@ function averageHold(includeSale = () => true) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(movement);
   }
+  for (const list of groups.values()) {
+    const lots = [];
+    for (const movement of list) {
+      if (movement.type === "buy") {
+        if (movement.quantity > 0) lots.push({ at: movement.at, left: movement.quantity });
+        continue;
+      }
+      let need = movement.quantity;
+      while (need > 0 && lots.length > 0) {
+        const lot = lots[0];
+        const days = calendarDaysBetween(lot.at, movement.at);
+        if (days == null || days < 0) break;
+        const take = Math.min(need, lot.left);
+        onTake(movement, days, take);
+        need -= take;
+        lot.left -= take;
+        if (lot.left <= 0) lots.shift();
+      }
+      if (need > 0) onLeft(movement, need);
+    }
+  }
+}
+
+function averageHold(includeSale = () => true) {
   let weighted = 0;
   let units = 0;
   let unmatched = 0;
@@ -1340,34 +1364,34 @@ function averageHold(includeSale = () => true) {
     { label: "8–14 days", min: 8, max: 14, units: 0 },
     { label: "More than 14 days", min: 15, max: Infinity, units: 0 },
   ];
-  for (const list of groups.values()) {
-    const lots = [];
-    for (const movement of list) {
-      if (movement.type === "buy") {
-        if (movement.quantity > 0) lots.push({ at: movement.at, left: movement.quantity });
-        continue;
-      }
-      const counted = includeSale(movement);
-      let need = movement.quantity;
-      while (need > 0 && lots.length > 0) {
-        const lot = lots[0];
-        const days = calendarDaysBetween(lot.at, movement.at);
-        if (days == null || days < 0) break;
-        const take = Math.min(need, lot.left);
-        if (counted) {
-          weighted += days * take;
-          units += take;
-          const bin = bins.find((row) => days >= row.min && days <= row.max);
-          if (bin) bin.units += take;
-        }
-        need -= take;
-        lot.left -= take;
-        if (lot.left <= 0) lots.shift();
-      }
-      if (counted) unmatched += Math.max(0, need);
-    }
-  }
+  eachHoldTake((sale, days, take) => {
+    if (!includeSale(sale)) return;
+    weighted += days * take;
+    units += take;
+    const bin = bins.find((row) => days >= row.min && days <= row.max);
+    if (bin) bin.units += take;
+  }, (sale, left) => {
+    if (includeSale(sale)) unmatched += left;
+  });
   return { days: units > 0 ? weighted / units : null, units, unmatched, bins };
+}
+
+function holdDaysBySale() {
+  const weighted = new Map();
+  const units = new Map();
+  eachHoldTake((sale, days, take) => {
+    weighted.set(sale.id, (weighted.get(sale.id) || 0) + days * take);
+    units.set(sale.id, (units.get(sale.id) || 0) + take);
+  }, () => {});
+  const days = new Map();
+  for (const [id, count] of units) days.set(id, count > 0 ? weighted.get(id) / count : null);
+  return days;
+}
+
+function holdText(days) {
+  if (days == null) return "—";
+  if (Math.round(days * 10) / 10 === 0) return "Same day";
+  return formatDays(days);
 }
 
 function renderHoldBars(bins) {
@@ -1578,7 +1602,8 @@ function renderCategoryBoards() {
 function renderDashboard() {
   const summary = stats();
   const sales = salesList();
-  const pending = sales.filter(isPending).reduce((sum, sale) => sum + saleTotal(sale), 0);
+  const waiting = sales.filter(isPending);
+  const pending = waiting.reduce((sum, sale) => sum + saleTotal(sale), 0);
   const funds = totalFunds();
   const reprice = state.items.filter(needsReprice);
 
@@ -1586,6 +1611,7 @@ function renderDashboard() {
   fundsEl.textContent = money(funds);
   fundsEl.classList.toggle("neg", funds < 0);
   $("#dash-pending").textContent = money(pending);
+  $("#dash-credit").hidden = waiting.length === 0;
   $("#dash-upcoming").textContent = money(sumAmount(state.upcoming));
   $("#dash-reprice").textContent = String(reprice.length);
   $("#dashStock").textContent = `${summary.quantity} on hand · ${money(summary.cost)} total cost`;
@@ -1644,7 +1670,8 @@ function renderSales() {
   const monthSales = salesList().filter((sale) => monthKey(sale.at) === monthKeyFromDate(new Date()));
   const sold = monthSales.reduce((sum, sale) => sum + sale.quantity, 0);
   const profit = monthSales.reduce((sum, sale) => sum + (sale.profit || 0), 0);
-  const pending = salesList().filter(isPending).reduce((sum, sale) => sum + saleTotal(sale), 0);
+  const waiting = salesList().filter(isPending);
+  const pending = waiting.reduce((sum, sale) => sum + saleTotal(sale), 0);
   $("#sale-sold").textContent = String(sold);
   const profitEl = $("#sale-profit");
   profitEl.textContent = money(profit);
@@ -1653,6 +1680,8 @@ function renderSales() {
   const hold = averageHold((sale) => monthKey(sale.at) === month);
   $("#sale-delta").textContent = formatDays(hold.days);
   $("#sale-pending").textContent = money(pending);
+  $("#sale-credit").hidden = waiting.length === 0;
+  const holds = holdDaysBySale();
   const message = salesList().length === 0
     ? "No orders yet."
     : "Nothing in this view.";
@@ -1661,12 +1690,10 @@ function renderSales() {
     const total = order.lines.reduce((sum, sale) => sum + saleTotal(sale), 0);
     const profit = order.lines.reduce((sum, sale) => sum + (sale.profit || 0), 0);
     const pending = order.lines.some(isPending);
-    const payment = pending
-      ? `<span class="flag">COP/COD</span> <button type="button" class="texty" data-received="${esc(order.id)}">Credit</button>`
-      : "Cash/Bank Transfer";
+    const payment = pending ? `<span class="flag">COP/COD</span>` : "Cash/Bank Transfer";
     const names = order.lines.map((sale) => {
       const qty = order.lines.length > 1 ? ` × ${sale.quantity}` : "";
-      return `<span>${esc(saleTitle(sale))}${qty}</span>`;
+      return `<span>${esc(saleTitle(sale))}${qty}<span class="delta">${esc(holdText(holds.get(sale.id)))}</span></span>`;
     }).join("");
     const label = esc(orderTitle(order.lines));
     const armed = saleDeleteArmedId === order.id;
@@ -2556,9 +2583,67 @@ function creditItem(id) {
   creditSales(lines, orderTitle(lines) || item.name);
 }
 
-function markReceived(id) {
-  const lines = salesList().filter((sale) => orderKey(sale) === id);
-  creditSales(lines, orderTitle(lines));
+function pendingGames() {
+  return salesList()
+    .filter(isPending)
+    .slice()
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)) || saleTitle(a).localeCompare(saleTitle(b)));
+}
+
+function syncCreditSelection() {
+  const boxes = [...$("#creditList").querySelectorAll('input[name="sale"]')];
+  const checked = boxes.filter((box) => box.checked);
+  const all = $("#creditAll");
+  all.checked = boxes.length > 0 && checked.length === boxes.length;
+  all.indeterminate = checked.length > 0 && checked.length < boxes.length;
+  $("#creditSubmit").disabled = checked.length === 0;
+  const amount = pendingGames()
+    .filter((sale) => checked.some((box) => box.value === sale.id))
+    .reduce((sum, sale) => sum + saleTotal(sale), 0);
+  $("#creditTotal").textContent = checked.length ? `${money(amount)} selected` : "";
+}
+
+function openCreditDialog() {
+  const games = pendingGames();
+  const list = $("#creditList");
+  list.replaceChildren();
+  for (const sale of games) {
+    const item = document.createElement("li");
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = "sale";
+    input.value = sale.id;
+    const text = document.createElement("span");
+    const name = document.createElement("span");
+    name.className = "credit-name";
+    name.textContent = saleTitle(sale);
+    const meta = document.createElement("span");
+    meta.className = "credit-meta";
+    const qty = sale.quantity > 1 ? ` × ${sale.quantity}` : "";
+    meta.textContent = `${formatWhen(sale.at)}${qty} · ${money(saleTotal(sale))}`;
+    text.append(name, meta);
+    label.append(input, text);
+    item.append(label);
+    list.append(item);
+  }
+  $("#creditAllLabel").hidden = games.length === 0;
+  $("#creditEmpty").hidden = games.length > 0;
+  $("#creditAll").checked = false;
+  $("#creditAll").indeterminate = false;
+  syncCreditSelection();
+  rememberFocus();
+  $("#creditDialog").showModal();
+}
+
+function onCreditSubmit(event) {
+  event.preventDefault();
+  const ids = new Set([...$("#creditList").querySelectorAll('input[name="sale"]:checked')].map((box) => box.value));
+  const sales = pendingGames().filter((sale) => ids.has(sale.id));
+  if (!sales.length) return;
+  const label = sales.length === 1 ? saleTitle(sales[0]) : `${sales.length} games`;
+  creditSales(sales, label);
+  $("#creditDialog").close();
 }
 
 function markPaid(id) {
@@ -2745,6 +2830,15 @@ function bind() {
   });
 
   $("#dash-funds").addEventListener("click", openFundsDialog);
+  $("#dash-credit").addEventListener("click", openCreditDialog);
+  $("#sale-credit").addEventListener("click", openCreditDialog);
+  $("#creditAll").addEventListener("change", () => {
+    const checked = $("#creditAll").checked;
+    for (const box of $("#creditList").querySelectorAll('input[name="sale"]')) box.checked = checked;
+    syncCreditSelection();
+  });
+  $("#creditList").addEventListener("change", syncCreditSelection);
+  $("#creditForm").addEventListener("submit", onCreditSubmit);
   $("#fundsForm").addEventListener("submit", onFundsSubmit);
 
   $("#panel-inventory").addEventListener("click", (event) => {
@@ -2854,11 +2948,6 @@ function bind() {
     const paid = event.target.closest("[data-paid]");
     if (paid) {
       markPaid(paid.dataset.paid);
-      return;
-    }
-    const received = event.target.closest("[data-received]");
-    if (received) {
-      markReceived(received.dataset.received);
       return;
     }
     const record = event.target.closest("[data-record]");
