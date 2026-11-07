@@ -990,10 +990,26 @@ function renderMovements() {
   }
 }
 
+function placeTabIndicator() {
+  const nav = $("#tabs");
+  const indicator = $("#tabIndicator");
+  const current = nav.querySelector('.tab[aria-selected="true"]');
+  if (!indicator || !current) return;
+  indicator.style.width = `${current.offsetWidth}px`;
+  indicator.style.height = `${current.offsetHeight}px`;
+  indicator.style.transform = `translate(${current.offsetLeft}px, ${current.offsetTop}px)`;
+}
+
 function renderChrome() {
   const title = TAB_TITLES[ui.tab] || "Dashboard";
-  $("#pageTitle").textContent = title;
-  document.title = `BNS · ${title}`;
+  const heading = $("#pageTitle");
+  if (heading.textContent !== title) {
+    heading.textContent = title;
+    heading.classList.remove("title-in");
+    void heading.offsetWidth;
+    heading.classList.add("title-in");
+  }
+  document.title = `Pixel Bros · ${title}`;
   const action = TAB_ACTIONS[ui.tab];
   const button = $("#addBtn");
   button.hidden = !action;
@@ -1003,6 +1019,7 @@ function renderChrome() {
     $(`#panel-${id}`).hidden = id !== ui.tab;
     $(`#tab-${id}`).setAttribute("aria-selected", String(id === ui.tab));
   }
+  requestAnimationFrame(placeTabIndicator);
 }
 
 function salesList() {
@@ -2022,6 +2039,8 @@ function bind() {
     ui.tab = currentTab();
     render();
   });
+  window.addEventListener("resize", placeTabIndicator);
+  document.fonts?.ready.then(placeTabIndicator);
 
   $("#search").addEventListener("input", (event) => {
     ui.query = event.target.value;

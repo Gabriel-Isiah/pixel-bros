@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#2f4e3c">
   <meta name="description" content="A buy and sell ledger for stock, sales, expenses, and investors.">
-  <title>BNS</title>
+  <title>Pixel Bros</title>
   <link rel="icon" href="images/logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,7 +16,7 @@
   <p id="boot" class="boot">Loading the ledger…</p>
   <section id="auth" class="auth" hidden>
     <div class="auth-card">
-      <p class="eyebrow">Buy &amp; sell</p>
+      <p class="eyebrow">Pixel Bros</p>
       <h2 id="authHeading">Sign in</h2>
       <p id="authMessage" class="hint"></p>
       <form id="authForm" class="fields" autocomplete="on">
@@ -46,9 +46,9 @@
   <div class="page" id="app" hidden>
     <header class="top">
       <div class="brand">
-        <img class="mark" src="images/logo.png" alt="BNS">
+        <img class="mark" src="images/logo.png" alt="Pixel Bros">
         <div>
-          <p class="eyebrow">Buy &amp; sell</p>
+          <p class="eyebrow">Pixel Bros</p>
           <h1 id="pageTitle">Dashboard</h1>
         </div>
       </div>
@@ -59,6 +59,7 @@
     </header>
 
     <nav id="tabs" class="tabs" role="tablist" aria-label="Sections">
+      <span id="tabIndicator" class="tab-indicator" aria-hidden="true"></span>
       <button type="button" class="tab" id="tab-dashboard" role="tab" data-tab="dashboard" aria-selected="true" aria-controls="panel-dashboard">Dashboard</button>
       <button type="button" class="tab" id="tab-inventory" role="tab" data-tab="inventory" aria-selected="false" aria-controls="panel-inventory">Inventory</button>
       <button type="button" class="tab" id="tab-sales" role="tab" data-tab="sales" aria-selected="false" aria-controls="panel-sales">Sell log</button>
