@@ -300,12 +300,7 @@ function installmentOf(row) {
   const term = INSTALLMENT_TERMS.includes(row.term) ? row.term : null;
   if (!term) return null;
   const month = Math.min(term, Math.max(1, int(row.month) || 1));
-  const left = term - month + 1;
-  return { term, month, left, monthly: row.amount, owed: row.amount * left };
-}
-
-function owed(row) {
-  return installmentOf(row)?.owed ?? row.amount;
+  return { term, month };
 }
 
 function mapExpense(raw) {
@@ -1588,7 +1583,7 @@ function renderDashboard() {
   fundsEl.textContent = money(funds);
   fundsEl.classList.toggle("neg", funds < 0);
   $("#dash-pending").textContent = money(pending);
-  $("#dash-upcoming").textContent = money(state.upcoming.reduce((sum, row) => sum + owed(row), 0));
+  $("#dash-upcoming").textContent = money(sumAmount(state.upcoming));
   $("#dash-reprice").textContent = String(reprice.length);
   $("#dashStock").textContent = `${summary.quantity} on hand · ${money(summary.cost)} total cost`;
 
@@ -1674,7 +1669,7 @@ function expenseRow(row, kind) {
   const flagHtml = flag ? `<span class="flag">${esc(flag)}</span>` : "";
   const plan = kind === "upcoming" ? installmentOf(row) : null;
   const detail = plan
-    ? `${row.category} · Installment · month ${plan.month} of ${plan.term} · ${money(plan.owed)} left`
+    ? `${row.category} · Installment · month ${plan.month} of ${plan.term}`
     : kind === "upcoming"
       ? `${row.category} · Straight`
       : row.category;
@@ -1721,8 +1716,8 @@ function renderUpcoming() {
     return Number.isFinite(days) && days <= 30;
   });
   const next = [...source].sort((a, b) => a.date.localeCompare(b.date))[0];
-  $("#upcoming-total").textContent = money(source.reduce((sum, row) => sum + owed(row), 0));
-  $("#upcoming-soon").textContent = money(soon.reduce((sum, row) => sum + owed(row), 0));
+  $("#upcoming-total").textContent = money(sumAmount(source));
+  $("#upcoming-soon").textContent = money(sumAmount(soon));
   $("#upcoming-next").textContent = next ? formatDay(next.date) : "—";
   const message = state.upcoming.length === 0 ? "Nothing scheduled." : "Nothing in this view.";
   fillTable($("#upcomingRows"), matched, 4, message, (row) => expenseRow(row, "upcoming"));
