@@ -519,12 +519,13 @@ function currentTab() {
 
 let state = emptyLedger();
 let userId = null;
+let accountId = null;
 let loadToken = 0;
 let authMode = "sign-in";
 let saving = false;
 let dirty = false;
 let saveDone = Promise.resolve();
-const ui = { query: "", filter: "all", sort: "name", dir: "asc", flashId: null, tab: currentTab() };
+const ui = { query: "", sort: "name", dir: "asc", flashId: null, tab: currentTab() };
 let editingId = null;
 let tradeId = null;
 let editingSaleId = null;
@@ -538,19 +539,31 @@ let toastTimer = 0;
 let flashTimer = 0;
 let lastFocus = null;
 
+const loadedIds = Object.fromEntries(TABLES.map((table) => [table, new Set()]));
+
+function rememberLoaded(ledger) {
+  for (const table of TABLES) {
+    loadedIds[table] = new Set((ledger[table] || []).map((row) => row.id));
+  }
+}
+
 async function replaceTable(id, table, rows) {
-  let query = supabase.from(table).select("id").eq("user_id", id);
-  const existing = await query;
+  const existing = await supabase.from(table).select("id").eq("user_id", id);
   if (existing.error) return existing.error;
   if (rows.length) {
     const written = await supabase.from(table).upsert(rows, { onConflict: "user_id,id" });
     if (written.error) return written.error;
   }
-  const keep = new Set(rows.map((row) => row.id));
-  const stale = (existing.data || []).map((row) => row.id).filter((rowId) => !keep.has(rowId));
-  if (!stale.length) return null;
-  const removed = await supabase.from(table).delete().eq("user_id", id).in("id", stale);
-  return removed.error;
+  const remote = new Set((existing.data || []).map((row) => row.id));
+  const known = loadedIds[table] || new Set();
+  const present = new Set(rows.map((row) => row.id));
+  const stale = [...known].filter((rowId) => !present.has(rowId) && remote.has(rowId));
+  if (stale.length) {
+    const removed = await supabase.from(table).delete().eq("user_id", id).in("id", stale);
+    if (removed.error) return removed.error;
+  }
+  loadedIds[table] = present;
+  return null;
 }
 
 async function writeLedger(id, ledger) {
@@ -668,6 +681,7 @@ function showSetup() {
   $("#auth").hidden = false;
   $("#authForm").hidden = true;
   $("#authSwitch").hidden = true;
+  $("#authExtra").hidden = true;
   $("#authHeading").textContent = "Connect Supabase";
   $("#authMessage").textContent = secretKey
     ? "Use the publishable key from Supabase, not the secret key. Put it in VITE_SUPABASE_ANON_KEY on Vercel, then redeploy."
@@ -677,10 +691,41 @@ function showSetup() {
 function showAuth() {
   loadToken += 1;
   userId = null;
+  accountId = null;
   $("#boot").hidden = true;
   $("#auth").hidden = false;
   $("#app").hidden = true;
+  $("#authForm").hidden = false;
+  $("#authSwitch").hidden = false;
+  $("#authExtra").hidden = true;
   $("#authForm").remember.checked = remembered();
+  setAuthMode(authMode);
+}
+
+function showWaiting(message) {
+  $("#boot").hidden = true;
+  $("#auth").hidden = false;
+  $("#app").hidden = true;
+  $("#authForm").hidden = true;
+  $("#authSwitch").hidden = true;
+  $("#authExtra").hidden = false;
+  $("#authHeading").textContent = "Admin access";
+  $("#authMessage").textContent = message;
+}
+
+async function ensureShop() {
+  const current = await supabase.rpc("shop_context");
+  if (current.error) throw current.error;
+  if (current.data?.is_admin && current.data.owner_id) return current.data;
+
+  const claim = await supabase.rpc("claim_shop");
+  if (!claim.error) {
+    const again = await supabase.rpc("shop_context");
+    if (again.error) throw again.error;
+    if (again.data?.is_admin && again.data.owner_id) return again.data;
+  }
+  showWaiting(claim.error?.message || "An admin needs to add this email before this account can open the ledger.");
+  return null;
 }
 
 function setAuthMode(mode) {
@@ -701,8 +746,8 @@ function showApp() {
 
 async function openLedger(session) {
   const token = ++loadToken;
-  const id = session.user.id;
-  if (id === userId) {
+  const account = session.user.id;
+  if (account === accountId && userId) {
     showApp();
     return;
   }
@@ -710,13 +755,17 @@ async function openLedger(session) {
   $("#auth").hidden = true;
   $("#app").hidden = true;
   try {
-    let ledger = await fetchLedger(id);
+    const shop = await ensureShop();
+    if (!shop || token !== loadToken) return;
+    let ledger = await fetchLedger(shop.owner_id);
     if (token !== loadToken) return;
-    ledger = await maybeImportLocal(id, ledger);
+    ledger = await maybeImportLocal(shop.owner_id, ledger);
     if (token !== loadToken) return;
-    ledger.fundsAdjustment = await loadFundsAdjustment(id);
-    userId = id;
+    ledger.fundsAdjustment = await loadFundsAdjustment(shop.owner_id);
+    accountId = account;
+    userId = shop.owner_id;
     state = ledger;
+    rememberLoaded(ledger);
     showApp();
     render();
   } catch (error) {
@@ -795,14 +844,7 @@ function matchesQuery(item) {
 }
 
 function visibleItems() {
-  const items = state.items.filter((item) => {
-    if (!matchesQuery(item)) return false;
-    const status = statusOf(item);
-    if (ui.filter === "stocked") return status !== "out";
-    if (ui.filter === "low") return status === "low";
-    if (ui.filter === "out") return status === "out";
-    return true;
-  });
+  const items = state.items.filter(matchesQuery);
 
   const dir = ui.dir === "asc" ? 1 : -1;
   items.sort((a, b) => {
@@ -874,24 +916,6 @@ function renderStats() {
   profitEl.textContent = money(projected);
   profitEl.classList.toggle("neg", projected < 0);
   $("#stat-reprice").textContent = String(state.items.filter(needsReprice).length);
-}
-
-function renderFilters() {
-  const matched = state.items.filter(matchesQuery);
-  const counts = { all: matched.length, stocked: 0, low: 0, out: 0 };
-  for (const item of matched) {
-    const status = statusOf(item);
-    if (status === "out") counts.out += 1;
-    else counts.stocked += 1;
-    if (status === "low") counts.low += 1;
-  }
-
-  document.querySelectorAll("[data-filter]").forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.filter === ui.filter));
-  });
-  document.querySelectorAll("[data-count]").forEach((span) => {
-    span.textContent = String(counts[span.dataset.count] ?? 0);
-  });
 }
 
 function renderSort() {
@@ -1380,7 +1404,6 @@ function render() {
   renderChrome();
   renderDashboard();
   renderStats();
-  renderFilters();
   renderSort();
   renderRows();
   renderMovements();
@@ -1530,7 +1553,6 @@ function onItemSubmit(event) {
         unitCost: item.cost,
       });
     }
-    ui.filter = "all";
     ui.query = "";
     $("#search").value = "";
     flash(item.id);
@@ -1975,6 +1997,66 @@ function markPaid(id) {
   render();
 }
 
+function renderAdminList(admins) {
+  const list = $("#adminList");
+  list.replaceChildren();
+  if (!admins.length) {
+    const item = document.createElement("li");
+    item.textContent = "No admins yet.";
+    list.append(item);
+    return;
+  }
+  for (const admin of admins) {
+    const item = document.createElement("li");
+    item.textContent = admin.email;
+    list.append(item);
+  }
+}
+
+async function openAdmins() {
+  if (!supabase || !userId) return;
+  const result = await supabase.rpc("shop_context");
+  if (result.error) {
+    notify(result.error.message);
+    return;
+  }
+  renderAdminList(result.data?.admins || []);
+  const form = $("#adminsForm");
+  form.email.value = "";
+  rememberFocus();
+  $("#adminsDialog").showModal();
+  form.email.focus();
+}
+
+async function onAdminSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const email = form.email.value.trim();
+  const result = await supabase.rpc("add_admin", { admin_email: email });
+  if (result.error) {
+    notify(result.error.message);
+    return;
+  }
+  form.email.value = "";
+  const current = await supabase.rpc("shop_context");
+  if (!current.error) renderAdminList(current.data?.admins || []);
+  notify(`Added ${email}.`);
+}
+
+async function reloadSharedLedger() {
+  if (!userId || dirty || saving) return;
+  try {
+    const ledger = await fetchLedger(userId);
+    if (dirty || saving) return;
+    ledger.fundsAdjustment = await loadFundsAdjustment(userId);
+    state = ledger;
+    rememberLoaded(ledger);
+    render();
+  } catch (error) {
+    notify(error.message || "Could not refresh the ledger.");
+  }
+}
+
 async function onAuthSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2018,7 +2100,15 @@ function bind() {
   $("#authSwitch").addEventListener("click", () => {
     setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in");
   });
+  $("#authRetry").addEventListener("click", async () => {
+    const { data } = await supabase.auth.getSession();
+    if (data.session) openLedger(data.session);
+  });
+  $("#authLeave").addEventListener("click", signOut);
   $("#signOutBtn").addEventListener("click", signOut);
+  $("#adminsBtn").addEventListener("click", openAdmins);
+  $("#adminsForm").addEventListener("submit", onAdminSubmit);
+  window.addEventListener("focus", reloadSharedLedger);
 
   $("#addBtn").addEventListener("click", () => {
     if (ui.tab === "inventory") openItemDialog(null);
@@ -2050,13 +2140,6 @@ function bind() {
   for (const id of ["saleSearch", "expenseSearch", "upcomingSearch", "investorSearch"]) {
     $(`#${id}`).addEventListener("input", () => render());
   }
-
-  $(".filters").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-filter]");
-    if (!button) return;
-    ui.filter = button.dataset.filter;
-    render();
-  });
 
   $("#inventoryTable thead").addEventListener("click", (event) => {
     const button = event.target.closest("[data-sort]");

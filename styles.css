@@ -343,8 +343,7 @@ h1 {
 .texty,
 .remove,
 .icon-close,
-th button,
-.filter {
+th button {
   background: none;
   border: 0;
   padding: 0;
@@ -460,27 +459,15 @@ th button,
 
 ::placeholder { color: #7f9488; }
 
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  padding-bottom: 8px;
+.admin-list {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
 }
 
-.filter {
-  border-bottom: 1px solid transparent;
-  padding: 6px 0;
-  color: var(--muted);
-}
-
-.filter[aria-pressed="true"] {
-  color: var(--ink);
-  border-bottom-color: var(--gold);
-}
-
-.filter span {
-  margin-left: 6px;
-  font-variant-numeric: tabular-nums;
+.admin-list li {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
 }
 
 .toast {
@@ -1031,7 +1018,6 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   }
   .primary,
   .tabs,
-  .filters,
   .search,
   .actions,
   .toast,

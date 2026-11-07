@@ -40,6 +40,10 @@
         </div>
       </form>
       <button type="button" class="quiet" id="authSwitch">Create an account</button>
+      <div id="authExtra" class="sheet-actions end" hidden>
+        <button type="button" class="primary" id="authRetry">Check again</button>
+        <button type="button" class="quiet" id="authLeave">Sign out</button>
+      </div>
     </div>
   </section>
 
@@ -53,6 +57,7 @@
         </div>
       </div>
       <div class="top-actions">
+        <button type="button" class="quiet" id="adminsBtn">Admins</button>
         <button type="button" class="quiet" id="signOutBtn">Sign out</button>
         <button type="button" class="primary" id="addBtn" hidden>Add item</button>
       </div>
@@ -148,12 +153,6 @@
           <span class="eyebrow">Search</span>
           <input id="search" type="search" placeholder="Name, type, or notes" autocomplete="off">
         </label>
-        <div class="filters" role="group" aria-label="Filter by stock">
-          <button type="button" class="filter" data-filter="all" aria-pressed="true">All <span data-count="all">0</span></button>
-          <button type="button" class="filter" data-filter="stocked" aria-pressed="false">In stock <span data-count="stocked">0</span></button>
-          <button type="button" class="filter" data-filter="low" aria-pressed="false">Low <span data-count="low">0</span></button>
-          <button type="button" class="filter" data-filter="out" aria-pressed="false">Out <span data-count="out">0</span></button>
-        </div>
       </div>
 
       <div class="table-wrap">
@@ -516,6 +515,32 @@
         <div class="cluster">
           <button type="button" class="quiet" data-close>Cancel</button>
           <button type="submit" class="primary">Save funds</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="adminsDialog" aria-labelledby="adminsHeading">
+    <form id="adminsForm" class="sheet" autocomplete="off">
+      <div class="sheet-head">
+        <div>
+          <p class="eyebrow">Shop</p>
+          <h2 id="adminsHeading">Admins</h2>
+        </div>
+        <button type="button" class="icon-close" data-close aria-label="Close"><span aria-hidden="true">×</span></button>
+      </div>
+      <p class="hint">Admins share the same items, purchases, sales, expenses, and funds. The other person creates an account, then you add that email here.</p>
+      <ul id="adminList" class="admin-list"></ul>
+      <div class="fields">
+        <label class="wide">
+          <span>Email</span>
+          <input name="email" type="email" required autocomplete="off" autocapitalize="none" spellcheck="false">
+        </label>
+      </div>
+      <div class="sheet-actions end">
+        <div class="cluster">
+          <button type="button" class="quiet" data-close>Close</button>
+          <button type="submit" class="primary">Add admin</button>
         </div>
       </div>
     </form>
