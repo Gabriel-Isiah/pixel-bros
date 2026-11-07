@@ -699,6 +699,72 @@ td.empty,
 
 .ledger li p { margin: 0; }
 
+.bars li:not(.empty) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  row-gap: 8px;
+  align-items: center;
+}
+
+.bars .bar-track {
+  grid-column: 1 / -1;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(47, 78, 60, 0.08);
+  overflow: hidden;
+}
+
+.bars .bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--gold);
+  min-width: 4px;
+}
+
+.cat-block { border-top: 1px solid var(--line); }
+
+.cat-block summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cat-block summary::-webkit-details-marker { display: none; }
+
+.cat-block summary::marker { content: ""; }
+
+.cat-block summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  flex: none;
+}
+
+.cat-block[open] summary::before {
+  margin-top: 2px;
+  transform: rotate(45deg);
+}
+
+.cat-block summary p {
+  flex: 1;
+  margin: 0;
+}
+
+.cat-block ul { padding-left: 18px; }
+
+.cat-block .empty {
+  margin: 0 0 12px 18px;
+  padding: 0 0 8px;
+}
+
 .ledger time {
   flex: none;
   color: var(--muted);
@@ -1036,6 +1102,18 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   .ledger li {
     flex-direction: column;
     gap: 2px;
+  }
+
+  .cat-block li {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .bars li:not(.empty) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 16px;
   }
 
   .sheet { padding: 22px 18px 18px; }

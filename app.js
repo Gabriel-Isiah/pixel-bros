@@ -534,6 +534,7 @@ let saleDeleteArmedId = null;
 let removeArmed = false;
 let deleteArmedId = null;
 let movementDeleteArmedId = null;
+const openCategories = new Set();
 let recordKind = "expense";
 let recordId = null;
 let recordRemoveArmed = false;
@@ -1254,27 +1255,35 @@ function rankGroups(keyOf, labelOf) {
     .slice(0, 5);
 }
 
-function renderRank(list, rows, emptyText) {
+function renderBars(list, rows) {
   list.replaceChildren();
   if (rows.length === 0) {
     const item = document.createElement("li");
     item.className = "empty";
-    item.textContent = emptyText;
+    item.textContent = "No sales yet.";
     list.append(item);
     return;
   }
+  const max = Math.max(...rows.map((row) => row.units), 1);
   for (const row of rows) {
     const item = document.createElement("li");
     const text = document.createElement("p");
     text.textContent = row.label;
     const meta = document.createElement("span");
     meta.className = "category";
-    meta.textContent = `${row.units} sold · ${money(row.profit)} profit`;
+    meta.textContent = `${money(row.revenue)} · ${money(row.profit)} profit`;
     text.append(meta);
     const aside = document.createElement("span");
     aside.className = "aside";
-    aside.textContent = money(row.revenue);
-    item.append(text, aside);
+    aside.textContent = `${row.units} sold`;
+    const track = document.createElement("div");
+    track.className = "bar-track";
+    track.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    fill.style.width = `${(row.units / max) * 100}%`;
+    track.append(fill);
+    item.append(text, aside, track);
     list.append(item);
   }
 }
@@ -1326,6 +1335,179 @@ function holdNote(hold) {
   return `${measured} ${skipped}`;
 }
 
+const SHOP_TYPES = ["Game", "Hardware", "Accessory"];
+
+// Longer keys win. A group is the series title, so Breath of the Wild and Tears of the Kingdom share The Legend of Zelda.
+const SERIES = [
+  ["the legend of zelda", "The Legend of Zelda", "Game"],
+  ["animal crossing", "Animal Crossing", "Game"],
+  ["pokemon", "Pokemon", "Game"],
+  ["super smash bros", "Super Smash Bros", "Game"],
+  ["super mario party", "Super Mario Party", "Game"],
+  ["super mario bros", "Super Mario Bros", "Game"],
+  ["super mario", "Super Mario", "Game"],
+  ["mario kart", "Mario Kart", "Game"],
+  ["xenoblade chronicles", "Xenoblade Chronicles", "Game"],
+  ["marvel ultimate alliance", "Marvel Ultimate Alliance", "Game"],
+  ["red dead redemption", "Red Dead Redemption", "Game"],
+  ["resident evil", "Resident Evil", "Game"],
+  ["monster hunter", "Monster Hunter", "Game"],
+  ["final fantasy", "Final Fantasy", "Game"],
+  ["story of seasons", "Story of Seasons", "Game"],
+  ["luigis mansion", "Luigi's Mansion", "Game"],
+  ["dragons dogma", "Dragon's Dogma", "Game"],
+  ["bravely default", "Bravely Default", "Game"],
+  ["granblue fantasy", "Granblue Fantasy", "Game"],
+  ["nier automata", "Nier Automata", "Game"],
+  ["dark souls", "Dark Souls", "Game"],
+  ["the witcher", "The Witcher", "Game"],
+  ["overcooked", "Overcooked", "Game"],
+  ["octopath", "Octopath Traveler", "Game"],
+  ["bayonetta", "Bayonetta", "Game"],
+  ["digimon", "Digimon", "Game"],
+  ["persona", "Persona", "Game"],
+  ["yakuza", "Yakuza", "Game"],
+  ["raidou", "Raidou", "Game"],
+  ["nba 2k", "NBA 2K", "Game"],
+  ["nintendo switch oled", "Nintendo Switch OLED", "Hardware"],
+  ["nintendo switch lite", "Nintendo Switch Lite", "Hardware"],
+  ["nintendo switch pro controller", "Nintendo Switch Pro Controller", "Hardware"],
+  ["nintendo switch sports", "Nintendo Switch Sports", "Hardware"],
+  ["nintendo switch", "Nintendo Switch", "Hardware"],
+  ["pro controller", "Nintendo Switch Pro Controller", "Accessory"],
+  ["joycon", "Joy-Con", "Accessory"],
+  ["sd card", "SD Card", "Accessory"],
+];
+
+function normalizeTitle(name) {
+  return String(name || "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fallbackTitle(name) {
+  let text = String(name || "Item")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+\+.*$/i, "")
+    .replace(/\s+w\/.*$/i, "")
+    .replace(/\b(cart|used code|ns2)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = text.split(":");
+  if (parts.length > 1 && /edition|remaster|complete|definitive|\bhd\b|deluxe/i.test(parts.slice(1).join(":"))) {
+    text = parts[0].trim();
+  }
+  return text || "Item";
+}
+
+function seriesTitle(name, bucket) {
+  const norm = normalizeTitle(name);
+  let best = null;
+  for (const [key, label, type] of SERIES) {
+    if (type !== bucket || !norm.includes(key)) continue;
+    if (!best || key.length > best[0].length) best = [key, label];
+  }
+  return best ? best[1] : fallbackTitle(name);
+}
+
+function typeBucket(category) {
+  const value = String(category || "").trim().toLowerCase();
+  if (/^games?$/.test(value)) return "Game";
+  if (/^(hardware|consoles?)$/.test(value)) return "Hardware";
+  if (/^accessor(?:y|ies)$/.test(value)) return "Accessory";
+  return String(category || "Other").trim() || "Other";
+}
+
+function categoryBoards() {
+  const boards = new Map(SHOP_TYPES.map((type) => [type, new Map()]));
+  for (const sale of salesList()) {
+    const bucket = typeBucket(saleCategory(sale));
+    if (!boards.has(bucket)) boards.set(bucket, new Map());
+    const groups = boards.get(bucket);
+    const label = seriesTitle(saleItem(sale)?.name || sale.itemName, bucket);
+    let row = groups.get(label);
+    if (!row) {
+      row = { label, units: 0, revenue: 0, profit: 0 };
+      groups.set(label, row);
+    }
+    row.units += sale.quantity;
+    row.revenue += saleTotal(sale);
+    row.profit += sale.profit || 0;
+  }
+  const extras = [...boards.keys()].filter((key) => !SHOP_TYPES.includes(key) && boards.get(key).size > 0);
+  return [...SHOP_TYPES, ...extras].map((type) => {
+    const groups = [...boards.get(type).values()]
+      .sort((a, b) => b.units - a.units || b.revenue - a.revenue || a.label.localeCompare(b.label));
+    return {
+      type,
+      groups,
+      units: groups.reduce((sum, group) => sum + group.units, 0),
+      revenue: groups.reduce((sum, group) => sum + group.revenue, 0),
+      profit: groups.reduce((sum, group) => sum + group.profit, 0),
+    };
+  });
+}
+
+function renderCategoryBoards() {
+  const root = $("#dashCategories");
+  for (const details of root.querySelectorAll("details")) {
+    if (details.open) openCategories.add(details.dataset.cat);
+    else openCategories.delete(details.dataset.cat);
+  }
+  root.replaceChildren();
+  for (const board of categoryBoards()) {
+    const details = document.createElement("details");
+    details.className = "cat-block";
+    details.dataset.cat = board.type;
+    details.open = openCategories.has(board.type);
+    const summary = document.createElement("summary");
+    const text = document.createElement("p");
+    text.textContent = board.type;
+    const meta = document.createElement("span");
+    meta.className = "category";
+    meta.textContent = board.units
+      ? `${board.units} sold · ${money(board.profit)} profit`
+      : "No sales yet";
+    text.append(meta);
+    const aside = document.createElement("span");
+    aside.className = "aside";
+    aside.textContent = board.units ? money(board.revenue) : "—";
+    summary.append(text, aside);
+    details.append(summary);
+    if (board.groups.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = "No sales in this category yet.";
+      details.append(empty);
+    } else {
+      const list = document.createElement("ul");
+      for (const group of board.groups) {
+        const item = document.createElement("li");
+        const label = document.createElement("p");
+        label.textContent = group.label;
+        const groupMeta = document.createElement("span");
+        groupMeta.className = "category";
+        groupMeta.textContent = `${group.units} sold · ${money(group.profit)} profit`;
+        label.append(groupMeta);
+        const groupAside = document.createElement("span");
+        groupAside.className = "aside";
+        groupAside.textContent = money(group.revenue);
+        item.append(label, groupAside);
+        list.append(item);
+      }
+      details.append(list);
+    }
+    root.append(details);
+  }
+}
+
 function renderDashboard() {
   const summary = stats();
   const sales = salesList();
@@ -1355,14 +1537,11 @@ function renderDashboard() {
     </tr>`;
   }).join("");
 
-  renderRank($("#dashCategories"), rankGroups(
-    (sale) => saleCategory(sale),
-    (sale) => saleCategory(sale),
-  ), "No sales yet.");
-  renderRank($("#dashItems"), rankGroups(
+  renderCategoryBoards();
+  renderBars($("#dashItems"), rankGroups(
     (sale) => sale.itemId || sale.itemName,
     (sale) => saleItem(sale)?.name || sale.itemName,
-  ), "No sales yet.");
+  ));
 
   const hold = averageHold();
   $("#dashDelta").textContent = formatDays(hold.days);
