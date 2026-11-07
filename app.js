@@ -1258,13 +1258,45 @@ function monthKeys() {
   return [...keys].sort((a, b) => b.localeCompare(a)).slice(0, 12);
 }
 
-function changeCell(current, previous) {
-  const diff = current - previous;
-  if (diff === 0) return `<td class="num" data-label="Vs prior">Even</td>`;
-  const sign = diff > 0 ? "+" : "−";
-  const pct = previous > 0 ? ` · ${sign}${Math.abs(Math.round((diff / previous) * 100))}%` : "";
-  const cls = diff < 0 ? "num neg" : "num";
-  return `<td class="${cls}" data-label="Vs prior">${sign}${money(Math.abs(diff))}${pct}</td>`;
+function renderMonthBars() {
+  const list = $("#dashMonths");
+  list.replaceChildren();
+  const nowKey = monthKeyFromDate(new Date());
+  const rows = monthKeys().map((key) => ({ key, ...monthBucket(key) }));
+  const max = Math.max(...rows.map((row) => row.units), 0);
+  for (const row of rows) {
+    const item = document.createElement("li");
+    const text = document.createElement("p");
+    text.textContent = monthLabel(row.key);
+    if (row.key === nowKey) {
+      const flag = document.createElement("span");
+      flag.className = "flag";
+      flag.textContent = "Now";
+      text.append(flag);
+    }
+    const count = document.createElement("span");
+    count.className = "month-count";
+    count.textContent = `${row.units} sold`;
+    text.append(count);
+
+    const track = document.createElement("div");
+    track.className = "month-track";
+    track.style.setProperty("--share", max > 0 ? String(row.units / max) : "0");
+    track.setAttribute("role", "img");
+    track.setAttribute("aria-label", `${monthLabel(row.key)}, ${row.units} sold, ${money(row.profit)} profit`);
+    if (row.units > 0) {
+      const fill = document.createElement("div");
+      fill.className = "bar-fill";
+      fill.setAttribute("aria-hidden", "true");
+      track.append(fill);
+    }
+    const profit = document.createElement("span");
+    profit.className = row.profit < 0 ? "month-profit neg" : "month-profit";
+    profit.textContent = money(row.profit);
+    track.append(profit);
+    item.append(text, track);
+    list.append(item);
+  }
 }
 
 function rankGroups(keyOf, labelOf) {
@@ -1616,19 +1648,7 @@ function renderDashboard() {
   $("#dash-reprice").textContent = String(reprice.length);
   $("#dashStock").textContent = `${summary.quantity} on hand · ${money(summary.cost)} total cost`;
 
-  const nowKey = monthKeyFromDate(new Date());
-  $("#dashMonths").innerHTML = monthKeys().map((key) => {
-    const row = monthBucket(key);
-    const prior = monthBucket(shiftMonth(key, -1));
-    const now = key === nowKey ? ` <span class="flag">Now</span>` : "";
-    return `<tr>
-      <td data-label=""><span>${esc(monthLabel(key))}${now}</span></td>
-      <td class="num" data-label="Sold">${row.units}</td>
-      <td class="num" data-label="Revenue">${money(row.revenue)}</td>
-      <td class="num${row.profit < 0 ? " neg" : ""}" data-label="Profit">${money(row.profit)}</td>
-      ${changeCell(row.revenue, prior.revenue)}
-    </tr>`;
-  }).join("");
+  renderMonthBars();
 
   renderCategoryBoards();
   renderBars($("#dashItems"), rankGroups(

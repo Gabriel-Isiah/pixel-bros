@@ -239,9 +239,8 @@ h1.title-in {
 
 .split .ledger { margin-top: 0; }
 
-.dash-section { margin-top: 40px; }
+.month-chart { margin-top: 40px; }
 
-.dash-section h2,
 .ledger h2 {
   margin: 0 0 8px;
   font-size: 28px;
@@ -249,7 +248,6 @@ h1.title-in {
   letter-spacing: -0.02em;
 }
 
-.dash-section h2::before,
 .ledger h2::before {
   content: "";
   display: block;
@@ -258,8 +256,6 @@ h1.title-in {
   background: var(--gold);
   margin-bottom: 12px;
 }
-
-.dash-section .table-wrap { margin-top: 0; }
 
 .dash-figure {
   margin: 8px 0 0;
@@ -805,6 +801,50 @@ td.empty,
   background: var(--gold);
   min-width: 4px;
 }
+
+.ledger .month-bars li { display: block; }
+
+.month-bars p {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.month-count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.month-track {
+  position: relative;
+  height: 28px;
+  margin-top: 6px;
+}
+
+.month-track .bar-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 14px;
+  width: calc(var(--share) * (100% - 8rem));
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--gold);
+  min-width: 0;
+}
+
+.month-profit {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--share) * (100% - 8rem));
+  transform: translateY(-50%);
+  margin-left: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.month-profit.neg { color: var(--gold-ink); }
 
 .cat-block { border-top: 1px solid var(--line); }
 
