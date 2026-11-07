@@ -1470,12 +1470,13 @@ function updateItemPreview() {
   preview.classList.toggle("neg", profit < 0);
 }
 
-function setItemQuantityField(visible) {
+function setItemQuantityField(adding) {
   const field = $("#field-quantity");
   const input = $("#itemForm").quantity;
-  field.hidden = !visible;
-  input.required = visible;
-  input.disabled = !visible;
+  field.hidden = false;
+  input.disabled = false;
+  input.required = true;
+  input.min = adding ? "1" : "0";
 }
 
 function openItemDialog(id) {
@@ -1490,6 +1491,7 @@ function openItemDialog(id) {
 
   if (item) {
     form.name.value = item.name;
+    form.quantity.value = String(item.quantity);
     fillTypes(item.category);
     fillConditions(form.category.value, item.condition || "");
     form.cost.value = (item.cost / 100).toFixed(2);
@@ -1523,7 +1525,7 @@ function readItemForm(form) {
     name: form.name.value.trim(),
     category: type,
     condition: hasCondition ? form.condition.value : "",
-    quantity: existing ? existing.quantity : Math.max(1, int(form.quantity.value)),
+    quantity: existing ? Math.max(0, int(form.quantity.value)) : Math.max(1, int(form.quantity.value)),
     cost: Math.max(0, cents(form.cost.value)),
     price: Math.max(0, cents(form.price.value)),
     reorderAt: existing ? existing.reorderAt : 0,
