@@ -1009,7 +1009,7 @@ function renderChrome() {
     void heading.offsetWidth;
     heading.classList.add("title-in");
   }
-  document.title = `Pixel Bros · ${title}`;
+  document.title = "Pixel Bros BNS";
   const action = TAB_ACTIONS[ui.tab];
   const button = $("#addBtn");
   button.hidden = !action;
