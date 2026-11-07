@@ -533,6 +533,7 @@ let orderDraft = null;
 let saleDeleteArmedId = null;
 let removeArmed = false;
 let deleteArmedId = null;
+let movementDeleteArmedId = null;
 let recordKind = "expense";
 let recordId = null;
 let recordRemoveArmed = false;
@@ -863,7 +864,6 @@ function visibleItems() {
   return items;
 }
 
-const ICON_CHECK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.2 6.2 11.5 13 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const ICON_PENCIL = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9.2 3.3 12.7 6.8 5.5 14H2v-3.5L9.2 3.3Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="m7.8 4.7 3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
 const ICON_TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 4.5h9.6M6.2 4.5V3h3.6v1.5M4.4 4.5l.6 8.3h6l.6-8.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
@@ -901,7 +901,6 @@ function rowHTML(item) {
     <td class="actions" data-label="">
       <div class="row-actions">
         ${credit}
-        <button type="button" class="sell-act" data-action="sell" data-id="${id}" ${item.quantity < 1 ? "disabled" : ""} aria-label="Sell ${name}">${ICON_CHECK}<span>Sell</span></button>
         <button type="button" class="icon-act" data-action="edit" data-id="${id}" aria-label="Edit ${name}">${ICON_PENCIL}</button>
         <button type="button" class="icon-act${armed ? " armed" : ""}" data-action="delete" data-id="${id}" aria-label="${armed ? `Confirm delete ${name}` : `Delete ${name}`}">${ICON_TRASH}</button>
       </div>
@@ -959,30 +958,74 @@ function movementItem(movement) {
 }
 
 function movementActions(item) {
-  const wrap = document.createElement("div");
-  wrap.className = "row-actions";
   const waitingSales = pendingOrderSales(item);
   const waiting = waitingSales.reduce((sum, sale) => sum + saleTotal(sale), 0);
-  if (waiting > 0) {
-    const credit = document.createElement("button");
-    credit.type = "button";
-    credit.className = "credit-act";
-    credit.dataset.action = "credit";
-    credit.dataset.id = item.id;
-    credit.textContent = `Credit ${money(waiting)}`;
-    credit.setAttribute("aria-label", `Credit ${money(waiting)} for ${orderTitle(waitingSales)}`);
-    wrap.append(credit);
-  }
-  const sell = document.createElement("button");
-  sell.type = "button";
-  sell.className = "sell-act";
-  sell.dataset.action = "sell";
-  sell.dataset.id = item.id;
-  sell.disabled = item.quantity < 1;
-  sell.innerHTML = `${ICON_CHECK}<span>Sell</span>`;
-  sell.setAttribute("aria-label", `Sell ${item.name}`);
-  wrap.append(sell);
+  if (waiting <= 0) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "row-actions";
+  const credit = document.createElement("button");
+  credit.type = "button";
+  credit.className = "credit-act";
+  credit.dataset.action = "credit";
+  credit.dataset.id = item.id;
+  credit.textContent = `Credit ${money(waiting)}`;
+  credit.setAttribute("aria-label", `Credit ${money(waiting)} for ${orderTitle(waitingSales)}`);
+  wrap.append(credit);
   return wrap;
+}
+
+function undoBuy(item, movement) {
+  const nextQty = item.quantity - movement.quantity;
+  if (nextQty >= 0) {
+    if (nextQty > 0) {
+      const total = item.cost * item.quantity - (movement.unitCost || 0) * movement.quantity;
+      if (total >= 0) item.cost = Math.round(total / nextQty);
+    }
+    item.quantity = nextQty;
+    return 0;
+  }
+  item.quantity = 0;
+  return -nextQty;
+}
+
+function undoRecount(item, movement) {
+  if (movement.unitCost == null) return;
+  const delta = movement.quantity - movement.unitCost;
+  item.quantity = Math.max(0, item.quantity - delta);
+}
+
+function deleteStockChange(id) {
+  if (movementDeleteArmedId !== id) {
+    movementDeleteArmedId = id;
+    render();
+    return;
+  }
+  const movement = state.movements.find((entry) => entry.id === id && entry.type !== "sell");
+  movementDeleteArmedId = null;
+  if (!movement) {
+    render();
+    return;
+  }
+  const before = totalFunds();
+  const item = movementItem(movement);
+  let extra = "";
+  if (item && movement.type === "buy") {
+    const sold = undoBuy(item, movement);
+    if (sold > 0) {
+      const was = sold === 1 ? "was" : "were";
+      const left = item.quantity === 0 ? "none remain" : `${item.quantity} remain`;
+      extra = ` ${sold} ${was} already sold, so ${left} on hand.`;
+    }
+  } else if (item && movement.type === "recount") {
+    undoRecount(item, movement);
+  }
+  state.movements = state.movements.filter((entry) => entry.id !== id);
+  const label = movement.type === "buy"
+    ? `Removed the purchase of ${movement.quantity} × ${movement.itemName}.`
+    : `Removed the recount of ${movement.itemName}.`;
+  notify(`${label}${extra}${fundsChangeNote(before)}`);
+  save();
+  render();
 }
 
 function renderMovements() {
@@ -1007,7 +1050,18 @@ function renderMovements() {
     const side = document.createElement("div");
     side.className = "change-side";
     const stock = movementItem(movement);
-    if (stock) side.append(movementActions(stock));
+    const actions = stock ? movementActions(stock) : null;
+    if (actions) side.append(actions);
+    const armed = movementDeleteArmedId === movement.id;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = `icon-act${armed ? " armed" : ""}`;
+    remove.dataset.movement = movement.id;
+    remove.innerHTML = ICON_TRASH;
+    remove.setAttribute("aria-label", armed
+      ? `Confirm remove this stock change for ${movement.itemName}`
+      : `Remove this stock change for ${movement.itemName}`);
+    side.append(remove);
     const time = document.createElement("time");
     time.dateTime = movement.at;
     time.textContent = formatWhen(movement.at);
@@ -1602,7 +1656,13 @@ function onItemSubmit(event) {
     const previousQty = item.quantity;
     Object.assign(item, draft);
     if (draft.quantity !== previousQty) {
-      pushMovement({ type: "recount", itemId: item.id, itemName: item.name, quantity: item.quantity });
+      pushMovement({
+        type: "recount",
+        itemId: item.id,
+        itemName: item.name,
+        quantity: item.quantity,
+        unitCost: previousQty,
+      });
       notify(`Recounted ${item.name} to ${item.quantity}.`);
     } else {
       notify(`Updated ${item.name}.`);
@@ -1814,12 +1874,6 @@ function openOrder(lines, existing) {
   $("#sellHeading").textContent = existing ? "Edit order" : "New order";
   $("#sellSubmit").textContent = existing ? "Save order" : "Record order";
   showOrderDialog();
-}
-
-function openSell(id) {
-  const item = itemById(id);
-  if (!item || item.quantity < 1) return;
-  openOrder([freshLine(item)]);
 }
 
 function openNewOrder() {
@@ -2342,19 +2396,28 @@ function bind() {
     if (!button || button.disabled) return;
     const { id, action } = button.dataset;
     if (action === "delete") {
+      movementDeleteArmedId = null;
       deleteItem(id);
       return;
     }
     if (action === "credit") {
       deleteArmedId = null;
+      movementDeleteArmedId = null;
       creditItem(id);
       return;
     }
-    const wasArmed = deleteArmedId != null;
+    const wasArmed = deleteArmedId != null || movementDeleteArmedId != null;
     deleteArmedId = null;
+    movementDeleteArmedId = null;
     if (wasArmed) render();
     if (action === "edit") openItemDialog(id);
-    else if (action === "sell") openSell(id);
+  });
+
+  $("#movementList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-movement]");
+    if (!button) return;
+    event.stopPropagation();
+    deleteStockChange(button.dataset.movement);
   });
 
   $("#itemForm").addEventListener("submit", onItemSubmit);
