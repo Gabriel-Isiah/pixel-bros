@@ -1302,6 +1302,13 @@ function averageHold() {
   let weighted = 0;
   let units = 0;
   let unmatched = 0;
+  const bins = [
+    { label: "Same day", min: 0, max: 0, units: 0 },
+    { label: "1–3 days", min: 1, max: 3, units: 0 },
+    { label: "4–7 days", min: 4, max: 7, units: 0 },
+    { label: "8–14 days", min: 8, max: 14, units: 0 },
+    { label: "More than 14 days", min: 15, max: Infinity, units: 0 },
+  ];
   for (const list of groups.values()) {
     const lots = [];
     for (const movement of list) {
@@ -1317,6 +1324,8 @@ function averageHold() {
         const take = Math.min(need, lot.left);
         weighted += days * take;
         units += take;
+        const bin = bins.find((row) => days >= row.min && days <= row.max);
+        if (bin) bin.units += take;
         need -= take;
         lot.left -= take;
         if (lot.left <= 0) lots.shift();
@@ -1324,7 +1333,31 @@ function averageHold() {
       unmatched += Math.max(0, need);
     }
   }
-  return { days: units > 0 ? weighted / units : null, units, unmatched };
+  return { days: units > 0 ? weighted / units : null, units, unmatched, bins };
+}
+
+function renderHoldBars(bins) {
+  const list = $("#dashHold");
+  list.replaceChildren();
+  const max = Math.max(...bins.map((bin) => bin.units), 0);
+  for (const bin of bins) {
+    const item = document.createElement("li");
+    const text = document.createElement("p");
+    text.textContent = bin.label;
+    const aside = document.createElement("span");
+    aside.className = "aside";
+    aside.textContent = `${bin.units} ${bin.units === 1 ? "unit" : "units"}`;
+    const track = document.createElement("div");
+    track.className = "bar-track";
+    track.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    fill.style.width = max > 0 ? `${(bin.units / max) * 100}%` : "0%";
+    if (bin.units === 0) fill.style.minWidth = "0";
+    track.append(fill);
+    item.append(text, aside, track);
+    list.append(item);
+  }
 }
 
 function holdNote(hold) {
@@ -1546,6 +1579,7 @@ function renderDashboard() {
   const hold = averageHold();
   $("#dashDelta").textContent = formatDays(hold.days);
   $("#dashDeltaNote").textContent = holdNote(hold);
+  renderHoldBars(hold.bins);
 }
 
 function saleCategory(sale) {
