@@ -1258,45 +1258,89 @@ function monthKeys() {
   return [...keys].sort((a, b) => b.localeCompare(a)).slice(0, 12);
 }
 
-function renderMonthBars() {
-  const list = $("#dashMonths");
-  list.replaceChildren();
+function monthSeries() {
+  const current = monthKeyFromDate(new Date());
+  let oldest = current;
+  for (const key of monthKeys()) if (key < oldest) oldest = key;
+  const rows = [];
+  let cursor = oldest;
+  while (cursor <= current && rows.length < 24) {
+    rows.push({ key: cursor, ...monthBucket(cursor) });
+    cursor = shiftMonth(cursor, 1);
+  }
+  return rows.slice(-12);
+}
+
+function renderMonthLine() {
+  const host = $("#dashMonths");
+  host.replaceChildren();
   const nowKey = monthKeyFromDate(new Date());
-  const rows = monthKeys().map((key) => ({ key, ...monthBucket(key) }));
+  const rows = monthSeries();
   const max = Math.max(...rows.map((row) => row.units), 0);
+  const yOf = (units) => 14 + (max > 0 ? units / max : 0) * 52;
+  host.style.setProperty("--months", String(rows.length));
+  host.setAttribute("role", "img");
+  host.setAttribute("aria-label", rows.map((row) => {
+    const now = row.key === nowKey ? ", now" : "";
+    return `${monthLabel(row.key)}${now}, ${row.units} sold, ${money(row.profit)} profit`;
+  }).join(". "));
+
+  const plot = document.createElement("div");
+  plot.className = "month-plot";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${Math.max(rows.length, 1)} 100`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const coords = rows.map((row, index) => ({ x: index + 0.5, y: 100 - yOf(row.units) }));
+  const baseline = 86;
+  const base = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  base.setAttribute("x1", "0");
+  base.setAttribute("y1", String(baseline));
+  base.setAttribute("x2", String(Math.max(rows.length, 1)));
+  base.setAttribute("y2", String(baseline));
+  base.setAttribute("class", "month-base");
+  svg.append(base);
+  if (coords.length > 1) {
+    const stroke = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    stroke.setAttribute("points", coords.map((point) => `${point.x},${point.y}`).join(" "));
+    stroke.setAttribute("class", "month-stroke");
+    svg.append(stroke);
+  }
+  plot.append(svg);
+
+  const points = document.createElement("ol");
+  points.className = "month-points";
+  const axis = document.createElement("ol");
+  axis.className = "month-axis";
   for (const row of rows) {
-    const item = document.createElement("li");
-    const text = document.createElement("p");
-    text.textContent = monthLabel(row.key);
+    const point = document.createElement("li");
+    point.style.setProperty("--y", `${yOf(row.units)}%`);
+    const profit = document.createElement("span");
+    profit.className = row.profit < 0 ? "month-profit neg" : "month-profit";
+    profit.textContent = money(row.profit);
+    const dot = document.createElement("span");
+    dot.className = "month-dot";
+    point.append(profit, dot);
+    points.append(point);
+
+    const tick = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "month-name";
+    name.textContent = monthLabel(row.key);
     if (row.key === nowKey) {
       const flag = document.createElement("span");
       flag.className = "flag";
       flag.textContent = "Now";
-      text.append(flag);
+      name.append(flag);
     }
     const count = document.createElement("span");
     count.className = "month-count";
     count.textContent = `${row.units} sold`;
-    text.append(count);
-
-    const track = document.createElement("div");
-    track.className = "month-track";
-    track.style.setProperty("--share", max > 0 ? String(row.units / max) : "0");
-    track.setAttribute("role", "img");
-    track.setAttribute("aria-label", `${monthLabel(row.key)}, ${row.units} sold, ${money(row.profit)} profit`);
-    if (row.units > 0) {
-      const fill = document.createElement("div");
-      fill.className = "bar-fill";
-      fill.setAttribute("aria-hidden", "true");
-      track.append(fill);
-    }
-    const profit = document.createElement("span");
-    profit.className = row.profit < 0 ? "month-profit neg" : "month-profit";
-    profit.textContent = money(row.profit);
-    track.append(profit);
-    item.append(text, track);
-    list.append(item);
+    tick.append(name, count);
+    axis.append(tick);
   }
+  plot.append(points);
+  host.append(plot, axis);
 }
 
 function rankGroups(keyOf, labelOf) {
@@ -1648,7 +1692,7 @@ function renderDashboard() {
   $("#dash-reprice").textContent = String(reprice.length);
   $("#dashStock").textContent = `${summary.quantity} on hand · ${money(summary.cost)} total cost`;
 
-  renderMonthBars();
+  renderMonthLine();
 
   renderCategoryBoards();
   renderBars($("#dashItems"), rankGroups(

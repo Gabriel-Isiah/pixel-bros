@@ -802,49 +802,103 @@ td.empty,
   min-width: 4px;
 }
 
-.ledger .month-bars li { display: block; }
+.month-line { overflow-x: auto; }
 
-.month-bars p {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.month-count {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.month-track {
+.month-plot {
   position: relative;
-  height: 28px;
-  margin-top: 6px;
+  height: 168px;
 }
 
-.month-track .bar-fill {
+.month-plot svg {
   position: absolute;
-  left: 0;
-  top: 50%;
-  height: 14px;
-  width: calc(var(--share) * (100% - 8rem));
-  transform: translateY(-50%);
-  border-radius: 999px;
-  background: var(--gold);
-  min-width: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.month-stroke {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.month-base {
+  stroke: rgba(47, 78, 60, 0.16);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.month-points,
+.month-axis {
+  display: grid;
+  grid-template-columns: repeat(var(--months), minmax(104px, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.month-points {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+}
+
+.ledger .month-points li,
+.ledger .month-axis li {
+  display: block;
+  padding: 0;
+  border: 0;
+}
+
+.month-points li { position: relative; }
+
+.month-dot {
+  position: absolute;
+  left: 50%;
+  bottom: var(--y);
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fffcf7;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 2px var(--gold);
+  transform: translate(-50%, 50%);
 }
 
 .month-profit {
   position: absolute;
-  top: 50%;
-  left: calc(var(--share) * (100% - 8rem));
-  transform: translateY(-50%);
-  margin-left: 10px;
+  left: 50%;
+  bottom: var(--y);
+  transform: translate(-50%, calc(-100% - 12px));
+  font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .month-profit.neg { color: var(--gold-ink); }
+
+.month-axis { margin-top: 8px; }
+
+.month-axis li { text-align: center; }
+
+.month-name {
+  display: block;
+  font-size: 13px;
+}
+
+.month-name .flag { margin-left: 6px; }
+
+.month-count {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
 
 .cat-block { border-top: 1px solid var(--line); }
 
