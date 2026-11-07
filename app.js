@@ -1463,8 +1463,19 @@ function updateItemPreview() {
     return;
   }
   const profit = Math.max(0, cents(form.price.value || 0)) - Math.max(0, cents(form.cost.value || 0));
-  preview.textContent = `${money(profit)} profit`;
+  const quantity = $("#field-quantity").hidden ? 1 : Math.max(0, int(form.quantity.value));
+  preview.textContent = quantity > 1
+    ? `${money(profit)} profit each · ${money(profit * quantity)} for ${quantity}`
+    : `${money(profit)} profit`;
   preview.classList.toggle("neg", profit < 0);
+}
+
+function setItemQuantityField(visible) {
+  const field = $("#field-quantity");
+  const input = $("#itemForm").quantity;
+  field.hidden = !visible;
+  input.required = visible;
+  input.disabled = !visible;
 }
 
 function openItemDialog(id) {
@@ -1475,6 +1486,7 @@ function openItemDialog(id) {
   form.reset();
   $("#itemHeading").textContent = item ? "Edit item" : "New item";
   $("#removeBtn").hidden = !item;
+  setItemQuantityField(!item);
 
   if (item) {
     form.name.value = item.name;
@@ -1511,7 +1523,7 @@ function readItemForm(form) {
     name: form.name.value.trim(),
     category: type,
     condition: hasCondition ? form.condition.value : "",
-    quantity: existing ? existing.quantity : 1,
+    quantity: existing ? existing.quantity : Math.max(1, int(form.quantity.value)),
     cost: Math.max(0, cents(form.cost.value)),
     price: Math.max(0, cents(form.price.value)),
     reorderAt: existing ? existing.reorderAt : 0,
@@ -1526,6 +1538,10 @@ function onItemSubmit(event) {
   const typeOk = requireText(form.category, "Choose a type.");
   const needsCondition = (ITEM_CONDITIONS[form.category.value] || []).length > 0;
   const conditionOk = needsCondition ? requireText(form.condition, "Choose a condition.") : true;
+  if (!editingId) {
+    const quantity = int(form.quantity.value);
+    form.quantity.setCustomValidity(quantity < 1 ? "Add at least 1." : "");
+  }
   if (!nameOk || !typeOk || !conditionOk || !form.reportValidity()) return;
 
   const draft = readItemForm(form);
@@ -1556,7 +1572,7 @@ function onItemSubmit(event) {
     ui.query = "";
     $("#search").value = "";
     flash(item.id);
-    notify(`Added ${item.name}.`);
+    notify(item.quantity > 1 ? `Added ${item.quantity} × ${item.name}.` : `Added ${item.name}.`);
   }
 
   save();
@@ -2178,7 +2194,7 @@ function bind() {
 
   $("#itemForm").addEventListener("submit", onItemSubmit);
   $("#itemForm").addEventListener("input", (event) => {
-    if (event.target.name === "name" || event.target.name === "category" || event.target.name === "condition") {
+    if (event.target.name === "name" || event.target.name === "category" || event.target.name === "condition" || event.target.name === "quantity") {
       event.target.setCustomValidity("");
     }
     if (event.target.name === "category") fillConditions(event.target.value, "");
