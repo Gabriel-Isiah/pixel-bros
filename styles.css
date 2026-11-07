@@ -582,6 +582,21 @@ td.neg,
 dd.neg,
 .figure-edit.neg { color: var(--gold-ink); }
 
+dd.profit-low,
+td.profit-low { color: #a35d58; }
+
+dd.profit-mid,
+td.profit-mid { color: #a78416; }
+
+dd.profit-good,
+td.profit-good { color: #3d9a62; }
+
+dd.profit-great,
+td.profit-great {
+  color: #0d7a34;
+  font-weight: 600;
+}
+
 .actions {
   text-align: right;
   white-space: nowrap;

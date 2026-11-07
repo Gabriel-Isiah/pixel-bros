@@ -1319,7 +1319,7 @@ function renderBars(list, rows) {
   }
 }
 
-function averageHold() {
+function averageHold(includeSale = () => true) {
   const groups = new Map();
   const movements = state.movements
     .filter((movement) => movement.type === "buy" || movement.type === "sell")
@@ -1347,21 +1347,24 @@ function averageHold() {
         if (movement.quantity > 0) lots.push({ at: movement.at, left: movement.quantity });
         continue;
       }
+      const counted = includeSale(movement);
       let need = movement.quantity;
       while (need > 0 && lots.length > 0) {
         const lot = lots[0];
         const days = calendarDaysBetween(lot.at, movement.at);
         if (days == null || days < 0) break;
         const take = Math.min(need, lot.left);
-        weighted += days * take;
-        units += take;
-        const bin = bins.find((row) => days >= row.min && days <= row.max);
-        if (bin) bin.units += take;
+        if (counted) {
+          weighted += days * take;
+          units += take;
+          const bin = bins.find((row) => days >= row.min && days <= row.max);
+          if (bin) bin.units += take;
+        }
         need -= take;
         lot.left -= take;
         if (lot.left <= 0) lots.shift();
       }
-      unmatched += Math.max(0, need);
+      if (counted) unmatched += Math.max(0, need);
     }
   }
   return { days: units > 0 ? weighted / units : null, units, unmatched, bins };
@@ -1613,6 +1616,19 @@ function renderDashboard() {
   renderHoldBars(hold.bins);
 }
 
+function profitTone(amount) {
+  const cents = Math.round(Number(amount) || 0);
+  if (cents < 9900) return "profit-low";
+  if (cents <= 14900) return "profit-mid";
+  if (cents <= 24900) return "profit-good";
+  return "profit-great";
+}
+
+function paintProfit(el, amount) {
+  el.classList.remove("neg", "profit-low", "profit-mid", "profit-good", "profit-great");
+  el.classList.add(profitTone(amount));
+}
+
 function saleCategory(sale) {
   return saleItem(sale)?.category || "General";
 }
@@ -1632,16 +1648,10 @@ function renderSales() {
   $("#sale-sold").textContent = String(sold);
   const profitEl = $("#sale-profit");
   profitEl.textContent = money(profit);
-  profitEl.classList.toggle("neg", profit < 0);
-  const deltaEl = $("#sale-delta");
-  if (sold > 0) {
-    const delta = Math.round(profit / sold);
-    deltaEl.textContent = money(delta);
-    deltaEl.classList.toggle("neg", delta < 0);
-  } else {
-    deltaEl.textContent = "—";
-    deltaEl.classList.remove("neg");
-  }
+  paintProfit(profitEl, profit);
+  const month = monthKeyFromDate(new Date());
+  const hold = averageHold((sale) => monthKey(sale.at) === month);
+  $("#sale-delta").textContent = formatDays(hold.days);
   $("#sale-pending").textContent = money(pending);
   const message = salesList().length === 0
     ? "No orders yet."
@@ -1665,7 +1675,7 @@ function renderSales() {
       <td class="order-names" data-label="">${names}</td>
       <td class="num" data-label="Qty">${quantity}</td>
       <td class="num" data-label="Total">${money(total)}</td>
-      <td class="num${profit < 0 ? " neg" : ""}" data-label="Profit">${money(profit)}</td>
+      <td class="num ${profitTone(profit)}" data-label="Profit">${money(profit)}</td>
       <td data-label="Payment">${payment}</td>
       <td class="actions" data-label="">
         <div class="row-actions">
