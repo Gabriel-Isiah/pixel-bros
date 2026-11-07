@@ -182,18 +182,22 @@
     </section>
 
     <section id="panel-sales" class="panel" role="tabpanel" aria-labelledby="tab-sales" hidden>
-      <dl class="stats thirds" aria-label="Sales summary">
+      <dl class="stats" aria-label="Sales summary">
         <div>
-          <dt>Orders</dt>
-          <dd id="sale-count">0</dd>
+          <dt>Games sold this month</dt>
+          <dd id="sale-sold">0</dd>
         </div>
         <div>
-          <dt>Revenue</dt>
-          <dd id="sale-revenue">₱0.00</dd>
-        </div>
-        <div>
-          <dt>Profit</dt>
+          <dt>Profit this month</dt>
           <dd id="sale-profit">₱0.00</dd>
+        </div>
+        <div>
+          <dt title="Average profit per game sold this month">Avg delta this month</dt>
+          <dd id="sale-delta">—</dd>
+        </div>
+        <div>
+          <dt title="COP/COD sales waiting to be credited">Pending COP/COD</dt>
+          <dd id="sale-pending">₱0.00</dd>
         </div>
       </dl>
       <div class="toolbar">

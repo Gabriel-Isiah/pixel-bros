@@ -1625,10 +1625,24 @@ function renderSales() {
     ...order.lines.flatMap((sale) => [sale.itemName, saleItem(sale)?.condition || ""]),
   ));
   const shown = query.trim() ? matched : orders;
-  const totals = salesTotals(shown.flatMap((order) => order.lines));
-  $("#sale-count").textContent = String(shown.length);
-  $("#sale-revenue").textContent = money(totals.revenue);
-  $("#sale-profit").textContent = money(totals.profit);
+  const monthSales = salesList().filter((sale) => monthKey(sale.at) === monthKeyFromDate(new Date()));
+  const sold = monthSales.reduce((sum, sale) => sum + sale.quantity, 0);
+  const profit = monthSales.reduce((sum, sale) => sum + (sale.profit || 0), 0);
+  const pending = salesList().filter(isPending).reduce((sum, sale) => sum + saleTotal(sale), 0);
+  $("#sale-sold").textContent = String(sold);
+  const profitEl = $("#sale-profit");
+  profitEl.textContent = money(profit);
+  profitEl.classList.toggle("neg", profit < 0);
+  const deltaEl = $("#sale-delta");
+  if (sold > 0) {
+    const delta = Math.round(profit / sold);
+    deltaEl.textContent = money(delta);
+    deltaEl.classList.toggle("neg", delta < 0);
+  } else {
+    deltaEl.textContent = "—";
+    deltaEl.classList.remove("neg");
+  }
+  $("#sale-pending").textContent = money(pending);
   const message = salesList().length === 0
     ? "No orders yet."
     : "Nothing in this view.";
