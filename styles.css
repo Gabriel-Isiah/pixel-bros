@@ -725,6 +725,8 @@ dialog {
   box-shadow: 0 24px 70px rgba(47, 78, 60, 0.18);
 }
 
+dialog.order-dialog { width: min(640px, calc(100vw - 32px)); }
+
 dialog:focus { outline: none; }
 
 dialog[open] { animation: rise 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
@@ -805,6 +807,65 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   width: auto;
   flex: none;
 }
+
+.order-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.order-lines li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 112px auto;
+  gap: 10px 12px;
+  align-items: end;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.order-lines li.empty {
+  display: block;
+  border-bottom: 0;
+  color: var(--muted);
+}
+
+.order-lines .order-title,
+.order-lines .order-meta { margin: 0; }
+
+.order-lines .order-meta {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.order-lines label span,
+.order-add label span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.order-add {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.order-add label { flex: 1; min-width: 0; }
+
+.order-add .gold {
+  flex: none;
+  padding: 8px 14px;
+}
+
+.order-names span { display: block; }
+
+.order-dialog .terms { margin-top: 18px; }
 
 .terms {
   border: 0;
@@ -978,6 +1039,13 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   }
 
   .sheet { padding: 22px 18px 18px; }
+
+  .order-lines li { grid-template-columns: 1fr 1fr; }
+
+  .order-lines .order-about,
+  .order-lines li .quiet { grid-column: 1 / -1; }
+
+  .order-add { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

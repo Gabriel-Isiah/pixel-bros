@@ -198,6 +198,7 @@ const TAB_TITLES = {
 
 const TAB_ACTIONS = {
   inventory: "Add item",
+  sales: "New order",
   expenses: "Add expense",
   upcoming: "Add upcoming",
   investors: "Add investor",
@@ -528,7 +529,7 @@ let saveDone = Promise.resolve();
 const ui = { query: "", sort: "name", dir: "asc", flashId: null, tab: currentTab() };
 let editingId = null;
 let tradeId = null;
-let editingSaleId = null;
+let orderDraft = null;
 let saleDeleteArmedId = null;
 let removeArmed = false;
 let deleteArmedId = null;
@@ -881,9 +882,10 @@ function rowHTML(item) {
   const id = esc(item.id);
   const name = esc(item.name);
   const armed = deleteArmedId === item.id;
-  const waiting = pendingSales(item).reduce((sum, sale) => sum + saleTotal(sale), 0);
+  const waitingSales = pendingOrderSales(item);
+  const waiting = waitingSales.reduce((sum, sale) => sum + saleTotal(sale), 0);
   const credit = waiting > 0
-    ? `<button type="button" class="credit-act" data-action="credit" data-id="${id}" aria-label="Credit ${money(waiting)} for ${name}">Credit ${money(waiting)}</button>`
+    ? `<button type="button" class="credit-act" data-action="credit" data-id="${id}" aria-label="Credit ${money(waiting)} for ${esc(orderTitle(waitingSales))}">Credit ${money(waiting)}</button>`
     : "";
 
   return `<tr data-id="${id}" class="${classes}">
@@ -959,7 +961,8 @@ function movementItem(movement) {
 function movementActions(item) {
   const wrap = document.createElement("div");
   wrap.className = "row-actions";
-  const waiting = pendingSales(item).reduce((sum, sale) => sum + saleTotal(sale), 0);
+  const waitingSales = pendingOrderSales(item);
+  const waiting = waitingSales.reduce((sum, sale) => sum + saleTotal(sale), 0);
   if (waiting > 0) {
     const credit = document.createElement("button");
     credit.type = "button";
@@ -967,7 +970,7 @@ function movementActions(item) {
     credit.dataset.action = "credit";
     credit.dataset.id = item.id;
     credit.textContent = `Credit ${money(waiting)}`;
-    credit.setAttribute("aria-label", `Credit ${money(waiting)} for ${item.name}`);
+    credit.setAttribute("aria-label", `Credit ${money(waiting)} for ${orderTitle(waitingSales)}`);
     wrap.append(credit);
   }
   const sell = document.createElement("button");
@@ -1052,6 +1055,45 @@ function salesList() {
 
 function isPending(sale) {
   return sale.terms === "cop" || sale.terms === "cod";
+}
+
+// Lines of one order share an id prefix: `${orderId}~${lineId}`.
+// Older sales have no "~", so each one stays its own row.
+function orderKey(sale) {
+  const id = String(sale.id || "");
+  const mark = id.indexOf("~");
+  return mark === -1 ? id : id.slice(0, mark);
+}
+
+function orderGroups(sales) {
+  const groups = new Map();
+  for (const sale of sales) {
+    const id = orderKey(sale);
+    let order = groups.get(id);
+    if (!order) {
+      order = { id, at: sale.at, lines: [] };
+      groups.set(id, order);
+    }
+    if (String(sale.at) < String(order.at)) order.at = sale.at;
+    order.lines.push(sale);
+  }
+  return [...groups.values()].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
+function saleTitle(sale) {
+  const item = itemById(sale.itemId) || saleItem(sale);
+  const name = sale.itemName || item?.name || "Item";
+  return item?.condition ? `${name} · ${item.condition}` : name;
+}
+
+function orderTitle(lines) {
+  return lines.map(saleTitle).join(", ");
+}
+
+function pendingOrderSales(item) {
+  const keys = new Set(pendingSales(item).map(orderKey));
+  if (!keys.size) return [];
+  return salesList().filter((sale) => keys.has(orderKey(sale)) && isPending(sale));
 }
 
 function saleMatchesItem(sale, item) {
@@ -1279,37 +1321,44 @@ function saleCategory(sale) {
 
 function renderSales() {
   const query = $("#saleSearch").value;
-  const matched = salesList()
-    .filter((sale) => textMatch(query, sale.itemName))
-    .slice()
-    .reverse();
-  const totals = salesTotals(query.trim() ? matched : salesList());
-  $("#sale-count").textContent = String(totals.count);
+  const orders = orderGroups(salesList());
+  const matched = orders.filter((order) => textMatch(
+    query,
+    ...order.lines.flatMap((sale) => [sale.itemName, saleItem(sale)?.condition || ""]),
+  ));
+  const shown = query.trim() ? matched : orders;
+  const totals = salesTotals(shown.flatMap((order) => order.lines));
+  $("#sale-count").textContent = String(shown.length);
   $("#sale-revenue").textContent = money(totals.revenue);
   $("#sale-profit").textContent = money(totals.profit);
   const message = salesList().length === 0
-    ? "No sales yet. Record one from Inventory."
+    ? "No orders yet."
     : "Nothing in this view.";
-  fillTable($("#saleRows"), matched, 7, message, (sale) => {
-    const total = saleTotal(sale);
-    const profit = sale.profit || 0;
-    const pending = isPending(sale);
+  fillTable($("#saleRows"), shown, 7, message, (order) => {
+    const quantity = order.lines.reduce((sum, sale) => sum + sale.quantity, 0);
+    const total = order.lines.reduce((sum, sale) => sum + saleTotal(sale), 0);
+    const profit = order.lines.reduce((sum, sale) => sum + (sale.profit || 0), 0);
+    const pending = order.lines.some(isPending);
     const payment = pending
-      ? `<span class="flag">COP/COD</span> <button type="button" class="texty" data-received="${esc(sale.id)}">Credit</button>`
+      ? `<span class="flag">COP/COD</span> <button type="button" class="texty" data-received="${esc(order.id)}">Credit</button>`
       : "Cash/Bank Transfer";
-    const name = esc(sale.itemName);
-    const armed = saleDeleteArmedId === sale.id;
+    const names = order.lines.map((sale) => {
+      const qty = order.lines.length > 1 ? ` × ${sale.quantity}` : "";
+      return `<span>${esc(saleTitle(sale))}${qty}</span>`;
+    }).join("");
+    const label = esc(orderTitle(order.lines));
+    const armed = saleDeleteArmedId === order.id;
     return `<tr>
-      <td data-label="Date"><span><time datetime="${esc(sale.at)}">${esc(formatWhen(sale.at))}</time></span></td>
-      <td class="item" data-label="">${name}</td>
-      <td class="num" data-label="Qty">${sale.quantity}</td>
+      <td data-label="Date"><span><time datetime="${esc(order.at)}">${esc(formatWhen(order.at))}</time></span></td>
+      <td class="order-names" data-label="">${names}</td>
+      <td class="num" data-label="Qty">${quantity}</td>
       <td class="num" data-label="Total">${money(total)}</td>
       <td class="num${profit < 0 ? " neg" : ""}" data-label="Profit">${money(profit)}</td>
       <td data-label="Payment">${payment}</td>
       <td class="actions" data-label="">
         <div class="row-actions">
-          <button type="button" class="icon-act" data-sale="edit" data-id="${esc(sale.id)}" aria-label="Edit sale of ${name}">${ICON_PENCIL}</button>
-          <button type="button" class="icon-act${armed ? " armed" : ""}" data-sale="delete" data-id="${esc(sale.id)}" aria-label="${armed ? `Confirm remove sale of ${name}` : `Remove sale of ${name}`}">${ICON_TRASH}</button>
+          <button type="button" class="icon-act" data-sale="edit" data-id="${esc(order.id)}" aria-label="Edit order of ${label}">${ICON_PENCIL}</button>
+          <button type="button" class="icon-act${armed ? " armed" : ""}" data-sale="delete" data-id="${esc(order.id)}" aria-label="${armed ? `Confirm remove order of ${label}` : `Remove order of ${label}`}">${ICON_TRASH}</button>
         </div>
       </td>
     </tr>`;
@@ -1612,106 +1661,190 @@ function removeItem() {
   $("#itemDialog").close();
 }
 
-function editingSale() {
-  if (!editingSaleId) return null;
-  return state.movements.find((movement) => movement.id === editingSaleId && movement.type === "sell") || null;
+function releasedQty(itemId) {
+  if (!orderDraft) return 0;
+  const previous = salesList()
+    .filter((sale) => orderKey(sale) === orderDraft.id && sale.itemId === itemId)
+    .reduce((sum, sale) => sum + sale.quantity, 0);
+  const stillHeld = orderDraft.lines
+    .filter((line) => line.itemId === itemId)
+    .reduce((sum, line) => sum + (line.held || 0), 0);
+  return Math.max(0, previous - stillHeld);
 }
 
-function updateSellPreview() {
-  const item = itemById(tradeId);
-  const sale = editingSale();
+function lineAvailable(line) {
+  const item = itemById(line.itemId);
+  return (item ? item.quantity : 0) + (line.held || 0);
+}
+
+function freshLine(item, held = 0) {
+  return {
+    lineId: uid(),
+    itemId: item.id,
+    itemName: item.name,
+    quantity: 1,
+    unitPrice: item.price,
+    unitCost: item.cost,
+    held,
+  };
+}
+
+function lineFromSale(sale) {
+  return {
+    lineId: uid(),
+    itemId: sale.itemId,
+    itemName: sale.itemName,
+    quantity: sale.quantity,
+    unitPrice: sale.unitPrice || 0,
+    unitCost: sale.unitCost || 0,
+    held: sale.quantity,
+  };
+}
+
+function orderGameChoices() {
+  const taken = new Set(orderDraft.lines.map((line) => line.itemId));
+  return state.items
+    .filter((item) => !taken.has(item.id) && item.quantity + releasedQty(item.id) > 0)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function readOrderLines() {
+  if (!orderDraft) return;
+  for (const line of orderDraft.lines) {
+    const row = document.querySelector(`#orderLines [data-line="${CSS.escape(line.lineId)}"]`);
+    if (!row) continue;
+    line.quantity = Math.max(0, int(row.querySelector("[data-field=qty]").value));
+    line.unitPrice = Math.max(0, cents(row.querySelector("[data-field=price]").value || 0));
+  }
+}
+
+function updateOrderPreview() {
   const preview = $("#sellPreview");
-  if (!item && !sale) return;
-  const form = $("#sellForm");
-  const quantity = Math.max(0, int(form.quantity.value));
-  const unitPrice = Math.max(0, cents(form.price.value || 0));
-  if (quantity < 1) {
-    preview.textContent = "Enter a quantity.";
+  const lines = orderDraft ? orderDraft.lines : [];
+  if (!lines.length) {
+    preview.textContent = "Add a game to this order.";
     preview.classList.remove("neg");
     return;
   }
-  const unitCost = sale ? (sale.unitCost || 0) : item.cost;
-  const profit = (unitPrice - unitCost) * quantity;
-  const waiting = form.terms.value === "cop" ? " · COP/COD pending" : "";
-  preview.textContent = `${money(profit)} profit${waiting}`;
+  const revenue = lines.reduce((sum, line) => sum + (line.unitPrice || 0) * line.quantity, 0);
+  const profit = lines.reduce((sum, line) => sum + ((line.unitPrice || 0) - (line.unitCost || 0)) * line.quantity, 0);
+  const games = `${lines.length} ${lines.length === 1 ? "game" : "games"}`;
+  const waiting = $("#sellForm").terms.value === "cop" ? " · COP/COD pending" : "";
+  preview.textContent = `${games} · ${money(revenue)} · ${money(profit)} profit${waiting}`;
   preview.classList.toggle("neg", profit < 0);
 }
 
-function validateSell(form) {
-  const quantity = int(form.quantity.value);
-  const max = int(form.quantity.max);
-  if (quantity < 1) form.quantity.setCustomValidity("Enter a quantity of at least 1.");
-  else if (quantity > max) form.quantity.setCustomValidity(`Only ${max} available.`);
-  else form.quantity.setCustomValidity("");
+function renderOrderEditor() {
+  const list = $("#orderLines");
+  if (!orderDraft.lines.length) {
+    list.innerHTML = `<li class="empty">Add a game to this order.</li>`;
+  } else {
+    list.innerHTML = orderDraft.lines.map((line) => {
+      const available = lineAvailable(line);
+      const item = itemById(line.itemId);
+      const meta = item
+        ? `${available} available · cost ${money(line.unitCost || 0)}`
+        : `Recorded cost ${money(line.unitCost || 0)}`;
+      return `<li data-line="${esc(line.lineId)}">
+        <div class="order-about">
+          <p class="order-title">${esc(saleTitle(line))}</p>
+          <p class="order-meta">${esc(meta)}</p>
+        </div>
+        <label>
+          <span>Qty</span>
+          <input data-field="qty" type="number" min="1" max="${available}" step="1" inputmode="numeric" value="${line.quantity}" aria-label="Quantity of ${esc(saleTitle(line))}">
+        </label>
+        <label>
+          <span>Price</span>
+          <input data-field="price" type="number" min="0" step="0.01" inputmode="decimal" value="${((line.unitPrice || 0) / 100).toFixed(2)}" aria-label="Sale price of ${esc(saleTitle(line))}">
+        </label>
+        <button type="button" class="quiet" data-remove-line="${esc(line.lineId)}">Remove</button>
+      </li>`;
+    }).join("");
+  }
+
+  const choices = orderGameChoices();
+  const select = $("#orderItem");
+  select.replaceChildren();
+  if (!choices.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No games in stock";
+    select.append(option);
+    select.disabled = true;
+    $("#orderAdd").disabled = true;
+  } else {
+    select.disabled = false;
+    $("#orderAdd").disabled = false;
+    for (const item of choices) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      const condition = item.condition ? ` · ${item.condition}` : "";
+      const available = item.quantity + releasedQty(item.id);
+      option.textContent = `${item.name}${condition} · ${available} available`;
+      select.append(option);
+    }
+  }
+  updateOrderPreview();
 }
 
-function showSellDialog(form) {
-  updateSellPreview();
+function showOrderDialog() {
+  renderOrderEditor();
   rememberFocus();
   $("#sellDialog").showModal();
-  form.quantity.focus();
-  form.quantity.select();
+  const qty = $("#orderLines [data-field=qty]");
+  if (qty) {
+    qty.focus();
+    qty.select();
+  } else if (!$("#orderItem").disabled) {
+    $("#orderItem").focus();
+  }
+}
+
+function openOrder(lines, existing) {
+  orderDraft = {
+    id: existing ? existing.id : uid(),
+    at: existing ? existing.at : "",
+    lines,
+  };
+  const form = $("#sellForm");
+  form.reset();
+  form.terms.value = existing?.pending ? "cop" : "paid";
+  $("#sellHeading").textContent = existing ? "Edit order" : "New order";
+  $("#sellSubmit").textContent = existing ? "Save order" : "Record order";
+  showOrderDialog();
 }
 
 function openSell(id) {
   const item = itemById(id);
   if (!item || item.quantity < 1) return;
-  editingSaleId = null;
-  tradeId = item.id;
-  const form = $("#sellForm");
-  form.reset();
-  form.quantity.max = String(item.quantity);
-  form.quantity.value = "1";
-  form.quantity.setCustomValidity("");
-  form.price.value = (item.price / 100).toFixed(2);
-  $("#sellHeading").textContent = item.name;
-  $("#sellMeta").textContent = `${item.quantity} on hand · cost ${money(item.cost)}`;
-  $("#sellSubmit").textContent = "Record sale";
-  showSellDialog(form);
+  openOrder([freshLine(item)]);
+}
+
+function openNewOrder() {
+  openOrder([]);
 }
 
 function openSaleEdit(id) {
-  const sale = state.movements.find((movement) => movement.id === id && movement.type === "sell");
-  if (!sale) return;
-  const item = movementItem(sale);
-  editingSaleId = sale.id;
-  tradeId = item ? item.id : "";
-  const form = $("#sellForm");
-  form.reset();
-  const available = item ? item.quantity + sale.quantity : sale.quantity;
-  form.quantity.max = String(available);
-  form.quantity.value = String(sale.quantity);
-  form.quantity.setCustomValidity("");
-  form.price.value = ((sale.unitPrice || 0) / 100).toFixed(2);
-  form.terms.value = isPending(sale) ? "cop" : "paid";
-  $("#sellHeading").textContent = sale.itemName;
-  $("#sellMeta").textContent = item
-    ? `${item.quantity} on hand · recorded cost ${money(sale.unitCost || 0)}`
-    : "This item is no longer in inventory.";
-  $("#sellSubmit").textContent = "Save sale";
-  showSellDialog(form);
+  const lines = salesList().filter((sale) => orderKey(sale) === id);
+  if (!lines.length) return;
+  const at = lines.reduce((earliest, sale) => String(sale.at) < String(earliest) ? sale.at : earliest, lines[0].at);
+  openOrder(lines.map(lineFromSale), { id, at, pending: lines.some(isPending) });
 }
 
-function saveSaleEdit(form, sale) {
-  validateSell(form);
-  if (!form.reportValidity()) return;
-  const item = itemById(tradeId);
-  const quantity = int(form.quantity.value);
-  const unitPrice = Math.max(0, cents(form.price.value));
-  const unitCost = sale.unitCost == null ? (item ? item.cost : 0) : sale.unitCost;
-  const before = totalFunds();
-  if (item) item.quantity -= quantity - sale.quantity;
-  sale.quantity = quantity;
-  sale.unitCost = unitCost;
-  sale.unitPrice = unitPrice;
-  sale.profit = (unitPrice - unitCost) * quantity;
-  if (form.terms.value === "cop") sale.terms = "cop";
-  else delete sale.terms;
-  editingSaleId = null;
-  notify(`Updated sale of ${sale.itemName}.${fundsChangeNote(before)}`);
-  save();
-  render();
-  $("#sellDialog").close();
+function addOrderGame() {
+  if (!orderDraft) return;
+  readOrderLines();
+  const item = itemById($("#orderItem").value);
+  if (!item || item.quantity < 1) return;
+  orderDraft.lines.push(freshLine(item, releasedQty(item.id)));
+  renderOrderEditor();
+  const added = [...$("#orderLines").querySelectorAll("[data-field=qty]")].at(-1);
+  if (added) {
+    added.focus();
+    added.select();
+  }
 }
 
 function deleteSale(id) {
@@ -1720,14 +1853,16 @@ function deleteSale(id) {
     render();
     return;
   }
-  const sale = state.movements.find((movement) => movement.id === id && movement.type === "sell");
-  if (!sale) return;
+  const lines = salesList().filter((sale) => orderKey(sale) === id);
+  if (!lines.length) return;
   const before = totalFunds();
-  const item = movementItem(sale);
-  if (item) item.quantity += sale.quantity;
-  state.movements = state.movements.filter((movement) => movement.id !== id);
+  for (const sale of lines) {
+    const item = movementItem(sale);
+    if (item) item.quantity += sale.quantity;
+  }
+  state.movements = state.movements.filter((movement) => !(movement.type === "sell" && orderKey(movement) === id));
   saleDeleteArmedId = null;
-  notify(`Removed sale of ${sale.itemName}.${fundsChangeNote(before)}`);
+  notify(`Removed order of ${orderTitle(lines)}.${fundsChangeNote(before)}`);
   save();
   render();
 }
@@ -1753,36 +1888,63 @@ function onFundsSubmit(event) {
 
 function onSellSubmit(event) {
   event.preventDefault();
-  const form = event.currentTarget;
-  const sale = editingSale();
-  if (sale) {
-    saveSaleEdit(form, sale);
+  if (!orderDraft) return;
+  readOrderLines();
+  const lines = orderDraft.lines;
+  if (!lines.length) {
+    notify("Add a game to the order.");
     return;
   }
-  const item = itemById(tradeId);
-  if (!item) return;
-  validateSell(form);
-  if (!form.reportValidity()) return;
+  for (const line of lines) {
+    const available = lineAvailable(line);
+    if (line.quantity < 1) {
+      notify(`Enter a quantity for ${line.itemName}.`);
+      return;
+    }
+    if (line.quantity > available) {
+      notify(`Only ${available} ${line.itemName} available.`);
+      return;
+    }
+  }
 
-  const quantity = int(form.quantity.value);
-  const unitPrice = Math.max(0, cents(form.price.value));
-  const profit = (unitPrice - item.cost) * quantity;
-  const terms = form.terms.value === "cop" ? "cop" : "paid";
-  item.quantity -= quantity;
-  pushMovement({
-    type: "sell",
-    itemId: item.id,
-    itemName: item.name,
-    quantity,
-    unitCost: item.cost,
-    unitPrice,
-    profit,
-    ...(terms === "paid" ? {} : { terms }),
-  });
-  flash(item.id);
-  notify(terms === "paid"
-    ? `Sold ${quantity} × ${item.name}.`
-    : `Sold ${quantity} × ${item.name} · COP/COD pending.`);
+  const before = totalFunds();
+  const pending = event.currentTarget.terms.value === "cop";
+  const previous = salesList().filter((sale) => orderKey(sale) === orderDraft.id);
+  for (const sale of previous) {
+    const item = movementItem(sale);
+    if (item) item.quantity += sale.quantity;
+  }
+  state.movements = state.movements.filter((movement) => !(movement.type === "sell" && orderKey(movement) === orderDraft.id));
+  const priorTerms = previous.map((sale) => sale.terms).filter(Boolean);
+  const terms = pending
+    ? (priorTerms.length && priorTerms.every((term) => term === priorTerms[0]) ? priorTerms[0] : "cop")
+    : null;
+  const at = orderDraft.at || new Date().toISOString();
+  for (const line of lines) {
+    const item = itemById(line.itemId);
+    if (item) item.quantity = Math.max(0, item.quantity - line.quantity);
+    pushMovement({
+      id: `${orderDraft.id}~${uid()}`,
+      type: "sell",
+      itemId: line.itemId,
+      itemName: line.itemName,
+      quantity: line.quantity,
+      unitCost: line.unitCost || 0,
+      unitPrice: line.unitPrice,
+      profit: ((line.unitPrice || 0) - (line.unitCost || 0)) * line.quantity,
+      at,
+      ...(terms ? { terms } : {}),
+    });
+    if (item) flash(item.id);
+  }
+  const title = orderTitle(lines);
+  const count = `${lines.length} ${lines.length === 1 ? "game" : "games"}`;
+  notify(previous.length
+    ? `Updated order of ${title}.${fundsChangeNote(before)}`
+    : pending
+      ? `Recorded ${count}: ${title} · COP/COD pending.`
+      : `Recorded ${count}: ${title}.${fundsChangeNote(before)}`);
+  orderDraft = null;
   save();
   render();
   $("#sellDialog").close();
@@ -1989,13 +2151,13 @@ function creditSales(sales, label) {
 function creditItem(id) {
   const item = itemById(id);
   if (!item) return;
-  creditSales(pendingSales(item), item.name);
+  const lines = pendingOrderSales(item);
+  creditSales(lines, orderTitle(lines) || item.name);
 }
 
 function markReceived(id) {
-  const sale = state.movements.find((movement) => movement.id === id && movement.type === "sell");
-  if (!sale || !isPending(sale)) return;
-  creditSales([sale], sale.itemName);
+  const lines = salesList().filter((sale) => orderKey(sale) === id);
+  creditSales(lines, orderTitle(lines));
 }
 
 function markPaid(id) {
@@ -2130,6 +2292,7 @@ function bind() {
 
   $("#addBtn").addEventListener("click", () => {
     if (ui.tab === "inventory") openItemDialog(null);
+    else if (ui.tab === "sales") openNewOrder();
     else if (ui.tab === "expenses") openRecord("expense");
     else if (ui.tab === "upcoming") openRecord("upcoming");
     else if (ui.tab === "investors") openRecord("investor");
@@ -2220,10 +2383,30 @@ function bind() {
   });
 
   $("#sellForm").addEventListener("submit", onSellSubmit);
-  $("#sellForm").addEventListener("input", (event) => {
-    if (event.target.name === "quantity") event.target.setCustomValidity("");
-    updateSellPreview();
+  $("#sellForm").addEventListener("input", () => {
+    readOrderLines();
+    updateOrderPreview();
   });
+  $("#sellForm").addEventListener("change", (event) => {
+    if (event.target.name === "terms") updateOrderPreview();
+  });
+  $("#orderAdd").addEventListener("click", addOrderGame);
+  $("#orderItem").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addOrderGame();
+  });
+  $("#orderLines").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-remove-line]");
+    if (!button || !orderDraft) return;
+    readOrderLines();
+    orderDraft.lines = orderDraft.lines.filter((line) => line.lineId !== button.dataset.removeLine);
+    renderOrderEditor();
+  });
+  $("#orderLines").addEventListener("wheel", (event) => {
+    const input = event.target.closest("input");
+    if (input && document.activeElement === input) event.preventDefault();
+  }, { passive: false });
 
   $("#restockForm").addEventListener("submit", onRestockSubmit);
   $("#restockForm").addEventListener("input", (event) => {

@@ -183,7 +183,7 @@
     <section id="panel-sales" class="panel" role="tabpanel" aria-labelledby="tab-sales" hidden>
       <dl class="stats thirds" aria-label="Sales summary">
         <div>
-          <dt>Sales</dt>
+          <dt>Orders</dt>
           <dd id="sale-count">0</dd>
         </div>
         <div>
@@ -198,7 +198,7 @@
       <div class="toolbar">
         <label class="search">
           <span class="eyebrow">Search</span>
-          <input id="saleSearch" type="search" placeholder="Item" autocomplete="off">
+          <input id="saleSearch" type="search" placeholder="Game" autocomplete="off">
         </label>
       </div>
       <div class="table-wrap">
@@ -207,7 +207,7 @@
           <thead>
             <tr>
               <th scope="col">Date</th>
-              <th scope="col">Item</th>
+              <th scope="col">Order</th>
               <th scope="col" class="num">Qty</th>
               <th scope="col" class="num">Total</th>
               <th scope="col" class="num">Profit</th>
@@ -384,38 +384,35 @@
     </form>
   </dialog>
 
-  <dialog id="sellDialog" aria-labelledby="sellHeading">
+  <dialog id="sellDialog" class="order-dialog" aria-labelledby="sellHeading">
     <form id="sellForm" class="sheet" autocomplete="off">
       <div class="sheet-head">
         <div>
-          <p class="eyebrow">Sell</p>
-          <h2 id="sellHeading"></h2>
-          <p id="sellMeta" class="sheet-meta"></p>
+          <p class="eyebrow">Order</p>
+          <h2 id="sellHeading">New order</h2>
         </div>
         <button type="button" class="icon-close" data-close aria-label="Close"><span aria-hidden="true">×</span></button>
       </div>
-      <div class="fields">
+      <ul id="orderLines" class="order-lines"></ul>
+      <div class="order-add">
         <label>
-          <span>Quantity</span>
-          <input name="quantity" type="number" min="1" step="1" inputmode="numeric" required>
+          <span>Add a game</span>
+          <select id="orderItem"></select>
         </label>
-        <label>
-          <span>Sale price</span>
-          <input name="price" type="number" min="0" step="0.01" inputmode="decimal" required>
-        </label>
-        <fieldset class="terms wide">
-          <legend>Payment</legend>
-          <div class="term-options">
-            <label><input type="radio" name="terms" value="paid" checked> Cash/Bank Transfer</label>
-            <label><input type="radio" name="terms" value="cop"> COP/COD</label>
-          </div>
-        </fieldset>
+        <button type="button" class="gold" id="orderAdd">Add</button>
       </div>
+      <fieldset class="terms">
+        <legend>Payment</legend>
+        <div class="term-options">
+          <label><input type="radio" name="terms" value="paid" checked> Cash/Bank Transfer</label>
+          <label><input type="radio" name="terms" value="cop"> COP/COD</label>
+        </div>
+      </fieldset>
       <p id="sellPreview" class="preview" aria-live="polite"></p>
       <div class="sheet-actions end">
         <div class="cluster">
           <button type="button" class="quiet" data-close>Cancel</button>
-          <button type="submit" class="gold" id="sellSubmit">Record sale</button>
+          <button type="submit" class="gold" id="sellSubmit">Record order</button>
         </div>
       </div>
     </form>
