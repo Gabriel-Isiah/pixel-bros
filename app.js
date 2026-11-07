@@ -109,9 +109,7 @@ function todayKey() {
   return dayKey(new Date());
 }
 
-function needsReprice(item) {
-  return item.quantity > 0 && item.price <= item.cost;
-}
+let dueCuts = [];
 
 function daysUntil(day) {
   if (!day) return Number.NaN;
@@ -907,6 +905,8 @@ function rowHTML(item) {
     : status === "out"
       ? '<span class="flag out">Out</span>'
       : "";
+  const cut = dueCuts.find((row) => row.item.id === item.id);
+  const cutFlag = cut ? `<span class="flag">Cut</span>` : "";
   const classes = [
     status === "ok" ? "" : `is-${status}`,
     ui.flashId === item.id ? "flash" : "",
@@ -926,7 +926,7 @@ function rowHTML(item) {
     </td>
     <td data-label="Type">${esc(item.category)}</td>
     <td data-label="Condition">${esc(item.condition || "—")}</td>
-    <td class="num" data-label="On hand"><span class="qty-wrap">${item.quantity}${flag}</span></td>
+    <td class="num" data-label="On hand"><span class="qty-wrap">${item.quantity}${flag}${cutFlag}</span></td>
     <td class="num" data-label="Buy">${money(item.cost)}</td>
     <td class="num" data-label="Sell">${money(item.price)}</td>
     <td class="num${profit < 0 ? " neg" : ""}" data-label="Profit">${money(profit)}</td>
@@ -948,7 +948,7 @@ function renderStats() {
   const profitEl = $("#stat-profit");
   profitEl.textContent = money(projected);
   profitEl.classList.toggle("neg", projected < 0);
-  $("#stat-reprice").textContent = String(state.items.filter(needsReprice).length);
+  $("#stat-reprice").textContent = String(dueCuts.length);
 }
 
 function renderSort() {
@@ -1395,7 +1395,7 @@ function renderBars(list, rows) {
   }
 }
 
-function eachHoldTake(onTake, onLeft) {
+function eachHoldTake(onTake, onLeft, onRemain) {
   const groups = new Map();
   const movements = state.movements
     .filter((movement) => movement.type === "buy" || movement.type === "sell")
@@ -1410,7 +1410,14 @@ function eachHoldTake(onTake, onLeft) {
     const lots = [];
     for (const movement of list) {
       if (movement.type === "buy") {
-        if (movement.quantity > 0) lots.push({ at: movement.at, left: movement.quantity });
+        if (movement.quantity > 0) {
+          lots.push({
+            at: movement.at,
+            left: movement.quantity,
+            itemId: movement.itemId,
+            itemName: movement.itemName,
+          });
+        }
         continue;
       }
       let need = movement.quantity;
@@ -1426,6 +1433,62 @@ function eachHoldTake(onTake, onLeft) {
       }
       if (need > 0) onLeft(movement, need);
     }
+    if (onRemain) {
+      for (const lot of lots) if (lot.left > 0) onRemain(lot);
+    }
+  }
+}
+
+function priceCuts() {
+  const oldest = new Map();
+  eachHoldTake(() => {}, () => {}, (lot) => {
+    const key = lot.itemId || lot.itemName;
+    const current = oldest.get(key);
+    if (!current || String(lot.at) < String(current.at)) oldest.set(key, lot);
+  });
+  const now = new Date().toISOString();
+  const due = [];
+  for (const lot of oldest.values()) {
+    const item = (lot.itemId && itemById(lot.itemId))
+      || state.items.find((entry) => entry.name === lot.itemName);
+    if (!item || item.quantity <= 0) continue;
+    const days = calendarDaysBetween(lot.at, now);
+    if (days == null || days < 7) continue;
+    due.push({ item, days, weeks: Math.floor(days / 7) });
+  }
+  due.sort((a, b) => b.days - a.days || a.item.name.localeCompare(b.item.name));
+  return due;
+}
+
+function renderPriceCuts() {
+  const list = $("#dashReprice");
+  list.replaceChildren();
+  if (dueCuts.length === 0) {
+    const item = document.createElement("li");
+    item.className = "empty";
+    item.textContent = "Nothing has been in stock for a full week.";
+    list.append(item);
+    return;
+  }
+  for (const row of dueCuts) {
+    const item = document.createElement("li");
+    const text = document.createElement("p");
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "line-btn";
+    name.dataset.reprice = row.item.id;
+    name.textContent = row.item.name;
+    const meta = document.createElement("span");
+    meta.className = "category";
+    meta.textContent = `${row.days} days in stock`;
+    text.append(name, meta);
+    const aside = document.createElement("span");
+    aside.className = "aside";
+    aside.textContent = row.weeks === 1
+      ? "Cut the price · 1 week"
+      : `Cut the price · ${row.weeks} weeks`;
+    item.append(text, aside);
+    list.append(item);
   }
 }
 
@@ -1681,7 +1744,6 @@ function renderDashboard() {
   const waiting = sales.filter(isPending);
   const pending = waiting.reduce((sum, sale) => sum + saleTotal(sale), 0);
   const funds = totalFunds();
-  const reprice = state.items.filter(needsReprice);
 
   const fundsEl = $("#dash-funds");
   fundsEl.textContent = money(funds);
@@ -1689,9 +1751,10 @@ function renderDashboard() {
   $("#dash-pending").textContent = money(pending);
   $("#dash-credit").hidden = waiting.length === 0;
   $("#dash-upcoming").textContent = money(sumAmount(state.upcoming));
-  $("#dash-reprice").textContent = String(reprice.length);
+  $("#dash-reprice").textContent = String(dueCuts.length);
   $("#dashStock").textContent = `${summary.quantity} on hand · ${money(summary.cost)} total cost`;
 
+  renderPriceCuts();
   renderMonthLine();
 
   renderCategoryBoards();
@@ -1869,6 +1932,7 @@ function renderInvestors() {
 }
 
 function render() {
+  dueCuts = priceCuts();
   renderChrome();
   renderDashboard();
   renderStats();
@@ -1947,7 +2011,7 @@ function setItemQuantityField(adding) {
   input.min = adding ? "1" : "0";
 }
 
-function openItemDialog(id) {
+function openItemDialog(id, focusPrice = false) {
   const form = $("#itemForm");
   const item = id ? itemById(id) : null;
   editingId = item ? item.id : null;
@@ -1973,7 +2037,12 @@ function openItemDialog(id) {
   updateItemPreview();
   rememberFocus();
   $("#itemDialog").showModal();
-  form.name.focus();
+  if (focusPrice && item) {
+    form.price.focus();
+    form.price.select();
+  } else {
+    form.name.focus();
+  }
 }
 
 function requireText(input, message) {
@@ -2893,6 +2962,11 @@ function bind() {
     render();
   });
 
+  $("#dashReprice").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-reprice]");
+    if (!button) return;
+    openItemDialog(button.dataset.reprice, true);
+  });
   $("#dash-funds").addEventListener("click", openFundsDialog);
   $("#dash-credit").addEventListener("click", openCreditDialog);
   $("#sale-credit").addEventListener("click", openCreditDialog);
