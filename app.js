@@ -2327,6 +2327,17 @@ function readShare(value) {
   return Math.min(100, Math.max(0, Math.round(parsed * 10) / 10));
 }
 
+const UPCOMING_CATEGORIES = ["Business expense", "Personal expense"];
+
+function fillUpcomingCategories(selected) {
+  const select = $("#recordForm").upcomingCategory;
+  const values = !selected || UPCOMING_CATEGORIES.includes(selected)
+    ? UPCOMING_CATEGORIES
+    : [selected, ...UPCOMING_CATEGORIES];
+  select.innerHTML = values.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+  select.value = selected && values.includes(selected) ? selected : UPCOMING_CATEGORIES[0];
+}
+
 function fillRecordCategories() {
   const names = new Set();
   for (const row of [...state.expenses, ...state.upcoming]) {
@@ -2403,8 +2414,11 @@ function openRecord(kind, id) {
   $("#recordHeading").textContent = existing ? meta.edit : meta.create;
   $("#recordSave").textContent = meta.save;
   $("#recordRemove").hidden = !existing;
-  $("#field-category").hidden = !meta.category;
-  form.category.required = meta.category;
+  const upcoming = kind === "upcoming";
+  $("#field-category").hidden = !meta.category || upcoming;
+  form.category.required = meta.category && !upcoming;
+  $("#field-upcoming-category").hidden = !upcoming;
+  form.upcomingCategory.required = upcoming;
   $("#field-share").hidden = !meta.share;
   $("#amountLabel").textContent = meta.amount;
   $("#dateLabel").textContent = meta.date;
@@ -2416,7 +2430,8 @@ function openRecord(kind, id) {
     form.amount.value = (existing.amount / 100).toFixed(2);
     form.date.value = existing.date;
     form.notes.value = existing.notes || "";
-    if (meta.category) form.category.value = existing.category || "";
+    if (meta.category && !upcoming) form.category.value = existing.category || "";
+    if (upcoming) fillUpcomingCategories(existing.category || "");
     if (meta.share && existing.share != null) form.share.value = String(existing.share);
     if (kind === "upcoming" && installmentOf(existing)) {
       form.plan.value = "installment";
@@ -2425,6 +2440,7 @@ function openRecord(kind, id) {
     }
   } else {
     form.date.value = todayKey();
+    if (upcoming) fillUpcomingCategories("");
   }
   fillRecordCategories();
   syncPlanFields();
@@ -2439,7 +2455,9 @@ function onRecordSubmit(event) {
   const form = event.currentTarget;
   const meta = RECORD[recordKind];
   const nameOk = requireText(form.name, "Enter a name.");
-  const categoryOk = meta.category ? requireText(form.category, "Enter a category.") : true;
+  const categoryOk = meta.category && recordKind !== "upcoming"
+    ? requireText(form.category, "Enter a category.")
+    : true;
   if (cents(form.amount.value) <= 0) form.amount.setCustomValidity("Enter an amount greater than zero.");
   else form.amount.setCustomValidity("");
   if (!nameOk || !categoryOk || !form.reportValidity()) return;
@@ -2450,7 +2468,11 @@ function onRecordSubmit(event) {
     date: form.date.value,
     notes: form.notes.value.trim(),
   };
-  if (meta.category) draft.category = form.category.value.trim();
+  if (meta.category) {
+    draft.category = recordKind === "upcoming"
+      ? form.upcomingCategory.value
+      : form.category.value.trim();
+  }
   if (meta.share) draft.share = readShare(form.share.value);
   if (recordKind === "upcoming") {
     const installment = form.plan.value === "installment";
