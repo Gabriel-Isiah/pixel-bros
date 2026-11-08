@@ -345,10 +345,12 @@ function normalize(data) {
   const items = [];
   for (const raw of data.items) {
     if (!raw || raw.id == null || !raw.name) continue;
+    const unpacked = unpackCategory(raw.category);
     items.push({
       id: String(raw.id),
       name: String(raw.name),
-      category: String(raw.category || "General"),
+      category: String(raw.series ? raw.category : unpacked.category),
+      series: String(raw.series || unpacked.series || "").trim(),
       condition: String(raw.condition || ""),
       quantity: Math.max(0, int(raw.quantity)),
       cost: Math.max(0, Math.round(Number(raw.cost) || 0)),
@@ -425,7 +427,7 @@ function itemRow(item, userId) {
     user_id: userId,
     id: item.id,
     name: item.name,
-    category: item.category,
+    category: packCategory(item),
     condition: item.condition || "",
     quantity: item.quantity,
     cost: item.cost,
@@ -495,17 +497,21 @@ function rowsFor(table, ledger, userId) {
 
 function fromRemote(table, rows) {
   if (table === "items") {
-    return rows.map((row) => ({
+    return rows.map((row) => {
+      const unpacked = unpackCategory(row.category);
+      return {
       id: row.id,
       name: row.name,
-      category: row.category,
+      category: unpacked.category,
+      series: unpacked.series,
       condition: row.condition || "",
       quantity: row.quantity,
       cost: row.cost,
       price: row.price,
       reorderAt: row.reorder_at,
       notes: row.notes,
-    }));
+      };
+    });
   }
   if (table === "movements") {
     return rows.map((row) => ({
@@ -872,7 +878,7 @@ function stats() {
 function matchesQuery(item) {
   const query = ui.query.trim().toLowerCase();
   if (!query) return true;
-  return `${item.name} ${item.category} ${item.condition || ""} ${item.notes}`.toLowerCase().includes(query);
+  return `${item.name} ${item.category} ${item.series || ""} ${item.condition || ""} ${item.notes}`.toLowerCase().includes(query);
 }
 
 function visibleItems() {
@@ -1575,6 +1581,99 @@ function holdNote(hold) {
 }
 
 const SHOP_TYPES = ["Game", "Hardware", "Accessory"];
+const SERIES_MARK = " · ";
+
+function packCategory(item) {
+  const category = String(item?.category || "General").trim() || "General";
+  const series = String(item?.series || "").trim();
+  if (!series || !SHOP_TYPES.includes(typeBucket(category))) return category;
+  return `${category}${SERIES_MARK}${series}`;
+}
+
+function unpackCategory(stored) {
+  const raw = String(stored || "").trim() || "General";
+  const mark = raw.indexOf(SERIES_MARK);
+  if (mark > 0) {
+    const category = typeBucket(raw.slice(0, mark));
+    const series = raw.slice(mark + SERIES_MARK.length).trim();
+    if (series && SHOP_TYPES.includes(category)) return { category, series };
+  }
+  return { category: raw, series: "" };
+}
+
+function categoryEditorValue(item) {
+  return String(item?.series || "").trim() || item?.category || "General";
+}
+
+function applyCategoryEdit(item, raw) {
+  const next = String(raw || "").trim();
+  if (!next) return false;
+  const asType = SHOP_TYPES.find((type) => type.toLowerCase() === next.toLowerCase());
+  if (asType) {
+    if (item.category === asType && !String(item.series || "").trim()) return false;
+    item.category = asType;
+    item.series = "";
+    return true;
+  }
+  const seriesHit = SERIES.find((entry) => entry[1].toLowerCase() === next.toLowerCase());
+  if (seriesHit) {
+    const label = seriesHit[1];
+    const type = seriesHit[2];
+    if (item.category === type && item.series === label) return false;
+    item.category = type;
+    item.series = label;
+    return true;
+  }
+  if (SHOP_TYPES.includes(typeBucket(item.category))) {
+    if (String(item.series || "").trim() === next) return false;
+    item.series = next;
+    return true;
+  }
+  if (item.category === next && !String(item.series || "").trim()) return false;
+  item.category = next;
+  item.series = "";
+  return true;
+}
+
+function categorySuggestions() {
+  const values = new Set(SHOP_TYPES);
+  for (const [, label] of SERIES) values.add(label);
+  for (const item of state.items) {
+    const category = String(item.category || "").trim();
+    const series = String(item.series || "").trim();
+    if (category) values.add(category);
+    if (series) values.add(series);
+  }
+  const extras = [...values].filter((value) => !SHOP_TYPES.includes(value));
+  extras.sort((a, b) => a.localeCompare(b));
+  return [...SHOP_TYPES, ...extras];
+}
+
+function fillSaleCategories() {
+  const list = $("#saleCategories");
+  if (!list) return;
+  const html = categorySuggestions().map((value) => `<option value="${esc(value)}"></option>`).join("");
+  if (list.dataset.stamp === html) return;
+  list.dataset.stamp = html;
+  list.innerHTML = html;
+}
+
+function commitCategory(input) {
+  const item = itemById(input.dataset.category);
+  if (!item) return;
+  const next = input.value.trim();
+  if (!next || !applyCategoryEdit(item, next)) {
+    input.value = categoryEditorValue(item);
+    return;
+  }
+  const label = categoryEditorValue(item);
+  for (const field of document.querySelectorAll(`input[data-category="${CSS.escape(item.id)}"]`)) {
+    field.value = label;
+  }
+  notify(`Classified ${item.name} as ${label}.`);
+  save();
+  render();
+}
 
 // Longer keys win. A group is the series title, so Breath of the Wild and Tears of the Kingdom share The Legend of Zelda.
 const SERIES = [
@@ -1670,7 +1769,9 @@ function categoryBoards() {
     const bucket = typeBucket(saleCategory(sale));
     if (!boards.has(bucket)) boards.set(bucket, new Map());
     const groups = boards.get(bucket);
-    const label = seriesTitle(saleItem(sale)?.name || sale.itemName, bucket);
+    const item = saleItem(sale);
+    const custom = String(item?.series || "").trim();
+    const label = custom || seriesTitle(item?.name || sale.itemName, bucket);
     let row = groups.get(label);
     if (!row) {
       row = { label, units: 0, revenue: 0, profit: 0 };
@@ -1800,7 +1901,10 @@ function renderSales() {
   const orders = orderGroups(salesList());
   const matched = orders.filter((order) => textMatch(
     query,
-    ...order.lines.flatMap((sale) => [sale.itemName, saleItem(sale)?.condition || "", saleCategory(sale)]),
+    ...order.lines.flatMap((sale) => {
+      const item = saleItem(sale);
+      return [sale.itemName, item?.condition || "", item?.category || "", item?.series || ""];
+    }),
   ));
   const shown = query.trim() ? matched : orders;
   const monthSales = salesList().filter((sale) => monthKey(sale.at) === monthKeyFromDate(new Date()));
@@ -1821,6 +1925,7 @@ function renderSales() {
   const message = salesList().length === 0
     ? "No orders yet."
     : "Nothing in this view.";
+  fillSaleCategories();
   fillTable($("#saleRows"), shown, 9, message, (order) => {
     const quantity = order.lines.reduce((sum, sale) => sum + sale.quantity, 0);
     const total = order.lines.reduce((sum, sale) => sum + saleTotal(sale), 0);
@@ -1835,15 +1940,13 @@ function renderSales() {
     }).join("");
     const categories = order.lines.map((sale) => {
       const item = saleItem(sale);
-      const current = item?.category || "General";
       const title = esc(saleTitle(sale));
-      if (!item) return `<span class="order-line">${esc(current)}</span>`;
-      const values = SHOP_TYPES.includes(current) ? SHOP_TYPES : [current, ...SHOP_TYPES];
-      const options = values.map((value) => {
-        const selected = value === current ? " selected" : "";
-        return `<option value="${esc(value)}"${selected}>${esc(value)}</option>`;
-      }).join("");
-      return `<select class="cat-select" data-category="${esc(item.id)}" aria-label="Category of ${title}">${options}</select>`;
+      if (!item) return `<span class="order-line">General</span>`;
+      const value = esc(categoryEditorValue(item));
+      const section = item.series && SHOP_TYPES.includes(typeBucket(item.category))
+        ? `<span class="cat-type">${esc(typeBucket(item.category))}</span>`
+        : "";
+      return `<span class="cat-pair"><input class="cat-edit" data-category="${esc(item.id)}" list="saleCategories" value="${value}" autocomplete="off" aria-label="Category of ${title}">${section}</span>`;
     }).join("");
     const deltas = order.lines.map((sale) => {
       const days = holds.get(sale.id);
@@ -2090,6 +2193,7 @@ function readItemForm(form) {
   return {
     name: form.name.value.trim(),
     category: type,
+    series: existing && existing.category === type ? String(existing.series || "").trim() : "",
     condition: hasCondition ? form.condition.value : "",
     quantity: existing ? Math.max(0, int(form.quantity.value)) : Math.max(1, int(form.quantity.value)),
     cost: Math.max(0, cents(form.cost.value)),
@@ -2259,6 +2363,7 @@ function updateOrderPreview() {
 }
 
 function renderOrderEditor() {
+  fillSaleCategories();
   const list = $("#orderLines");
   if (!orderDraft.lines.length) {
     list.innerHTML = `<li class="empty">Add a game to this order.</li>`;
@@ -2269,10 +2374,14 @@ function renderOrderEditor() {
       const meta = item
         ? `${available} available · cost ${money(line.unitCost || 0)}`
         : `Recorded cost ${money(line.unitCost || 0)}`;
+      const category = item
+        ? `<label class="line-category"><span>Category</span><input data-category="${esc(item.id)}" list="saleCategories" value="${esc(categoryEditorValue(item))}" autocomplete="off" aria-label="Category of ${esc(saleTitle(line))}"></label>`
+        : "";
       return `<li data-line="${esc(line.lineId)}">
         <div class="order-about">
           <p class="order-title">${esc(saleTitle(line))}</p>
           <p class="order-meta">${esc(meta)}</p>
+          ${category}
         </div>
         <label>
           <span>Qty</span>
@@ -3048,16 +3157,15 @@ function bind() {
   });
   $("#removeBtn").addEventListener("click", removeItem);
 
-  $("#saleRows").addEventListener("change", (event) => {
-    const select = event.target.closest("[data-category]");
-    if (!select) return;
-    const item = itemById(select.dataset.category);
-    if (!item || item.category === select.value) return;
-    item.category = select.value;
-    notify(`Classified ${item.name} as ${item.category}.`);
-    save();
-    render();
-  });
+  function onCategoryField(event) {
+    const input = event.target.closest("input[data-category]");
+    if (!input) return;
+    commitCategory(input);
+  }
+  $("#saleRows").addEventListener("change", onCategoryField);
+  $("#saleRows").addEventListener("focusout", onCategoryField);
+  $("#sellForm").addEventListener("change", onCategoryField);
+  $("#sellForm").addEventListener("focusout", onCategoryField);
 
   $("#saleRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-sale]");
