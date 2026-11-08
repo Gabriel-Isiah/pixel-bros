@@ -1601,99 +1601,19 @@ function unpackCategory(stored) {
   return { category: raw, series: "" };
 }
 
-function categoryEditorValue(item) {
-  return String(item?.series || "").trim() || item?.category || "General";
-}
-
-function applyCategoryEdit(item, raw) {
-  const next = String(raw || "").trim();
-  if (!next) return false;
-  const asType = SHOP_TYPES.find((type) => type.toLowerCase() === next.toLowerCase());
-  if (asType) {
-    if (item.category === asType && !String(item.series || "").trim()) return false;
-    item.category = asType;
-    item.series = "";
-    return true;
-  }
-  const seriesHit = SERIES.find((entry) => entry[1].toLowerCase() === next.toLowerCase());
-  if (seriesHit) {
-    const label = seriesHit[1];
-    const type = seriesHit[2];
-    if (item.category === type && item.series === label) return false;
-    item.category = type;
-    item.series = label;
-    return true;
-  }
-  if (SHOP_TYPES.includes(typeBucket(item.category))) {
-    if (String(item.series || "").trim() === next) return false;
-    item.series = next;
-    return true;
-  }
-  if (item.category === next && !String(item.series || "").trim()) return false;
-  item.category = next;
-  item.series = "";
-  return true;
-}
-
-function categoryChoiceValue(type, series) {
-  const name = String(series || "").trim();
-  return name ? `${type}\u001f${name}` : String(type || "General");
-}
-
-function itemCategoryChoice(item) {
-  const type = SHOP_TYPES.includes(typeBucket(item?.category))
-    ? typeBucket(item.category)
-    : String(item?.category || "General").trim() || "General";
-  return categoryChoiceValue(type, item?.series);
-}
-
-function applyCategoryChoice(item, value) {
-  const raw = String(value || "");
-  const split = raw.indexOf("\u001f");
-  const type = (split === -1 ? raw : raw.slice(0, split)).trim();
-  const series = split === -1 ? "" : raw.slice(split + 1).trim();
-  if (!type) return false;
-  if (item.category === type && String(item.series || "").trim() === series) return false;
-  item.category = type;
-  item.series = series;
-  return true;
+function shownCategory(item) {
+  const current = String(item?.category || "General").trim() || "General";
+  const bucket = typeBucket(current);
+  return SHOP_TYPES.includes(bucket) ? bucket : current;
 }
 
 function categoryOptionsHTML(item) {
-  const groups = new Map(SHOP_TYPES.map((type) => [type, new Set([type])]));
-  const other = new Set();
-  const add = (type, label) => {
-    const name = String(label || "").trim();
-    if (!name) return;
-    if (groups.has(type)) groups.get(type).add(name);
-    else other.add(name);
-  };
-  for (const [, label, type] of SERIES) add(type, label);
-  for (const entry of state.items) {
-    const series = String(entry.series || "").trim();
-    const category = String(entry.category || "").trim();
-    if (!category) continue;
-    const type = typeBucket(category);
-    if (series && groups.has(type)) add(type, series);
-    else add(type, category);
-  }
-  const current = itemCategoryChoice(item);
-  const option = (type, series) => {
-    const value = categoryChoiceValue(type, series);
-    const selected = value === current ? " selected" : "";
-    return `<option value="${esc(value)}"${selected}>${esc(series || type)}</option>`;
-  };
-  const sections = SHOP_TYPES.map((type) => {
-    const names = [...groups.get(type)].filter((name) => name !== type);
-    names.sort((a, b) => a.localeCompare(b));
-    const options = [option(type, ""), ...names.map((name) => option(type, name))].join("");
-    return `<optgroup label="${esc(type)}">${options}</optgroup>`;
+  const selected = shownCategory(item);
+  const values = SHOP_TYPES.includes(selected) ? SHOP_TYPES : [selected, ...SHOP_TYPES];
+  return values.map((value) => {
+    const on = value === selected ? " selected" : "";
+    return `<option value="${esc(value)}"${on}>${esc(value)}</option>`;
   }).join("");
-  const extras = [...other].sort((a, b) => a.localeCompare(b));
-  const more = extras.length
-    ? `<optgroup label="Other">${extras.map((name) => option(name, "")).join("")}</optgroup>`
-    : "";
-  return `${sections}${more}`;
 }
 
 function categorySelectHTML(item, title) {
@@ -1701,29 +1621,28 @@ function categorySelectHTML(item, title) {
 }
 
 function categoryMenu(item, title) {
-  return `<label class="line-category"><span>Category</span><select data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${categoryOptionsHTML(item)}</select></label>`;
+  return `<label class="order-category"><span>Category</span><select data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${categoryOptionsHTML(item)}</select></label>`;
 }
 
-function syncCategoryFields(item) {
-  const label = categoryEditorValue(item);
-  const choice = itemCategoryChoice(item);
-  for (const field of document.querySelectorAll(`[data-category="${CSS.escape(item.id)}"]`)) {
-    field.value = field.tagName === "SELECT" ? choice : label;
-  }
+function applyShopType(item, value) {
+  const next = SHOP_TYPES.find((type) => type.toLowerCase() === String(value || "").trim().toLowerCase());
+  if (!next) return false;
+  if (item.category === next && !String(item.series || "").trim()) return false;
+  item.category = next;
+  item.series = "";
+  return true;
 }
 
 function commitCategory(field) {
   const item = itemById(field.dataset.category);
-  if (!item) return;
-  const changed = field.tagName === "SELECT"
-    ? applyCategoryChoice(item, field.value)
-    : applyCategoryEdit(item, field.value.trim());
-  if (!changed) {
-    syncCategoryFields(item);
+  if (!item || !applyShopType(item, field.value)) {
+    if (item) field.value = shownCategory(item);
     return;
   }
-  syncCategoryFields(item);
-  notify(`Classified ${item.name} as ${categoryEditorValue(item)}.`);
+  for (const other of document.querySelectorAll(`[data-category="${CSS.escape(item.id)}"]`)) {
+    other.value = item.category;
+  }
+  notify(`Classified ${item.name} as ${item.category}.`);
   save();
   render();
 }
@@ -2416,7 +2335,7 @@ function renderOrderEditor() {
   } else {
     list.innerHTML = orderDraft.lines.map((line) => {
       const available = lineAvailable(line);
-      const item = itemById(line.itemId);
+      const item = saleItem(line);
       const meta = item
         ? `${available} available · cost ${money(line.unitCost || 0)}`
         : `Recorded cost ${money(line.unitCost || 0)}`;
@@ -2425,8 +2344,8 @@ function renderOrderEditor() {
         <div class="order-about">
           <p class="order-title">${esc(saleTitle(line))}</p>
           <p class="order-meta">${esc(meta)}</p>
-          ${category}
         </div>
+        ${category}
         <label>
           <span>Qty</span>
           <input data-field="qty" type="number" min="1" max="${available}" step="1" inputmode="numeric" value="${line.quantity}" aria-label="Quantity of ${esc(saleTitle(line))}">

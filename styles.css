@@ -1085,7 +1085,7 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
 
 .order-lines li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 112px auto;
+  grid-template-columns: minmax(0, 1.3fr) minmax(128px, 160px) 72px 112px auto;
   gap: 10px 12px;
   align-items: end;
   padding: 14px 0;
@@ -1162,25 +1162,7 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   outline: 0;
 }
 
-.line-category {
-  display: block;
-  margin-top: 10px;
-}
-
-.line-category select {
-  cursor: pointer;
-  padding-right: 24px;
-}
-
-.line-category span {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
+.order-category select { cursor: pointer; }
 
 .order-deltas .delta {
   font-variant-numeric: tabular-nums;
