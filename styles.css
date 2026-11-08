@@ -1169,8 +1169,12 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
 
 .line-category {
   display: block;
-  margin-top: 8px;
-  max-width: 240px;
+  margin-top: 10px;
+}
+
+.line-category select {
+  cursor: pointer;
+  padding-right: 24px;
 }
 
 .line-category span {

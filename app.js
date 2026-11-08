@@ -1658,19 +1658,87 @@ function fillSaleCategories() {
   list.innerHTML = html;
 }
 
-function commitCategory(input) {
-  const item = itemById(input.dataset.category);
+function categoryChoiceValue(type, series) {
+  const name = String(series || "").trim();
+  return name ? `${type}\u001f${name}` : String(type || "General");
+}
+
+function itemCategoryChoice(item) {
+  const type = SHOP_TYPES.includes(typeBucket(item?.category))
+    ? typeBucket(item.category)
+    : String(item?.category || "General").trim() || "General";
+  return categoryChoiceValue(type, item?.series);
+}
+
+function applyCategoryChoice(item, value) {
+  const raw = String(value || "");
+  const split = raw.indexOf("\u001f");
+  const type = (split === -1 ? raw : raw.slice(0, split)).trim();
+  const series = split === -1 ? "" : raw.slice(split + 1).trim();
+  if (!type) return false;
+  if (item.category === type && String(item.series || "").trim() === series) return false;
+  item.category = type;
+  item.series = series;
+  return true;
+}
+
+function categoryMenu(item, title) {
+  const groups = new Map(SHOP_TYPES.map((type) => [type, new Set([type])]));
+  const other = new Set();
+  const add = (type, label) => {
+    const name = String(label || "").trim();
+    if (!name) return;
+    if (groups.has(type)) groups.get(type).add(name);
+    else other.add(name);
+  };
+  for (const [, label, type] of SERIES) add(type, label);
+  for (const entry of state.items) {
+    const series = String(entry.series || "").trim();
+    const category = String(entry.category || "").trim();
+    if (!category) continue;
+    const type = typeBucket(category);
+    if (series && groups.has(type)) add(type, series);
+    else add(type, category);
+  }
+  const current = itemCategoryChoice(item);
+  const option = (type, series) => {
+    const value = categoryChoiceValue(type, series);
+    const selected = value === current ? " selected" : "";
+    return `<option value="${esc(value)}"${selected}>${esc(series || type)}</option>`;
+  };
+  const sections = SHOP_TYPES.map((type) => {
+    const names = [...groups.get(type)].filter((name) => name !== type);
+    names.sort((a, b) => a.localeCompare(b));
+    const options = [option(type, ""), ...names.map((name) => option(type, name))].join("");
+    return `<optgroup label="${esc(type)}">${options}</optgroup>`;
+  }).join("");
+  const extras = [...other].sort((a, b) => a.localeCompare(b));
+  const more = extras.length
+    ? `<optgroup label="Other">${extras.map((name) => option(name, "")).join("")}</optgroup>`
+    : "";
+  return `<label class="line-category"><span>Category</span><select data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${sections}${more}</select></label>`;
+}
+
+function syncCategoryFields(item) {
+  const label = categoryEditorValue(item);
+  const choice = itemCategoryChoice(item);
+  for (const field of document.querySelectorAll(`[data-category="${CSS.escape(item.id)}"]`)) {
+    field.value = field.tagName === "SELECT" ? choice : label;
+  }
+}
+
+function commitCategory(field) {
+  const item = itemById(field.dataset.category);
   if (!item) return;
-  const next = input.value.trim();
-  if (!next || !applyCategoryEdit(item, next)) {
-    input.value = categoryEditorValue(item);
+  const changed = field.tagName === "SELECT"
+    ? applyCategoryChoice(item, field.value)
+    : applyCategoryEdit(item, field.value.trim());
+  if (!changed) {
+    syncCategoryFields(item);
     return;
   }
-  const label = categoryEditorValue(item);
-  for (const field of document.querySelectorAll(`input[data-category="${CSS.escape(item.id)}"]`)) {
-    field.value = label;
-  }
-  notify(`Classified ${item.name} as ${label}.`);
+  syncCategoryFields(item);
+  notify(`Classified ${item.name} as ${categoryEditorValue(item)}.`);
   save();
   render();
 }
@@ -2374,9 +2442,7 @@ function renderOrderEditor() {
       const meta = item
         ? `${available} available · cost ${money(line.unitCost || 0)}`
         : `Recorded cost ${money(line.unitCost || 0)}`;
-      const category = item
-        ? `<label class="line-category"><span>Category</span><input data-category="${esc(item.id)}" list="saleCategories" value="${esc(categoryEditorValue(item))}" autocomplete="off" aria-label="Category of ${esc(saleTitle(line))}"></label>`
-        : "";
+      const category = item ? categoryMenu(item, saleTitle(line)) : "";
       return `<li data-line="${esc(line.lineId)}">
         <div class="order-about">
           <p class="order-title">${esc(saleTitle(line))}</p>
@@ -3158,9 +3224,9 @@ function bind() {
   $("#removeBtn").addEventListener("click", removeItem);
 
   function onCategoryField(event) {
-    const input = event.target.closest("input[data-category]");
-    if (!input) return;
-    commitCategory(input);
+    const field = event.target.closest("[data-category]");
+    if (!field || (field.tagName !== "INPUT" && field.tagName !== "SELECT")) return;
+    commitCategory(field);
   }
   $("#saleRows").addEventListener("change", onCategoryField);
   $("#saleRows").addEventListener("focusout", onCategoryField);
