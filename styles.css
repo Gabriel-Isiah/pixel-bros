@@ -643,6 +643,29 @@ tr.flash td { animation: rowflash 1.2s ease; }
   color: var(--gold-ink);
 }
 
+.pay {
+  display: inline-block;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pay-cash {
+  color: var(--ink);
+  background: rgba(47, 78, 60, 0.08);
+}
+
+.pay-credit {
+  color: var(--paper);
+  background: var(--ink);
+}
+
 .flag.out { color: var(--muted); }
 
 td.neg,
@@ -1109,12 +1132,44 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   padding: 8px 14px;
 }
 
-.order-names span { display: block; }
-
-.order-names .delta {
-  color: var(--muted);
-  font-size: 13px;
+.order-names .order-line,
+.order-deltas .delta,
+.order-cats .cat-select {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
 }
+
+.cat-select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  width: 100%;
+  max-width: 148px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(47, 78, 60, 0.28);
+  border-radius: 0;
+  padding: 4px 16px 4px 0;
+  cursor: pointer;
+}
+
+.order-deltas .delta {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.hold-same { color: #0d7a34; }
+
+.hold-soon { color: #3d9a62; }
+
+.hold-week { color: #a78416; }
+
+.hold-slow { color: #a35d58; }
+
+.hold-long { color: #7a3030; }
+
+.order-deltas .hold-long { font-weight: 600; }
 
 .order-dialog .terms { margin-top: 18px; }
 

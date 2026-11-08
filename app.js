@@ -1496,13 +1496,7 @@ function averageHold(includeSale = () => true) {
   let weighted = 0;
   let units = 0;
   let unmatched = 0;
-  const bins = [
-    { label: "Same day", min: 0, max: 0, units: 0 },
-    { label: "1–3 days", min: 1, max: 3, units: 0 },
-    { label: "4–7 days", min: 4, max: 7, units: 0 },
-    { label: "8–14 days", min: 8, max: 14, units: 0 },
-    { label: "More than 14 days", min: 15, max: Infinity, units: 0 },
-  ];
+  const bins = HOLD_BINS.map((bin) => ({ ...bin, units: 0 }));
   eachHoldTake((sale, days, take) => {
     if (!includeSale(sale)) return;
     weighted += days * take;
@@ -1527,10 +1521,25 @@ function holdDaysBySale() {
   return days;
 }
 
+const HOLD_BINS = [
+  { label: "Same day", min: 0, max: 0, tone: "hold-same" },
+  { label: "1–3 days", min: 1, max: 3, tone: "hold-soon" },
+  { label: "4–7 days", min: 4, max: 7, tone: "hold-week" },
+  { label: "8–14 days", min: 8, max: 14, tone: "hold-slow" },
+  { label: "More than 14 days", min: 15, max: Infinity, tone: "hold-long" },
+];
+
 function holdText(days) {
   if (days == null) return "—";
   if (Math.round(days * 10) / 10 === 0) return "Same day";
   return formatDays(days);
+}
+
+function holdTone(days) {
+  if (days == null || !Number.isFinite(Number(days))) return "";
+  const rounded = Math.round(Number(days) * 10) / 10;
+  const bin = HOLD_BINS.find((row) => rounded >= row.min && rounded <= row.max);
+  return bin ? bin.tone : "";
 }
 
 function renderHoldBars(bins) {
@@ -1791,7 +1800,7 @@ function renderSales() {
   const orders = orderGroups(salesList());
   const matched = orders.filter((order) => textMatch(
     query,
-    ...order.lines.flatMap((sale) => [sale.itemName, saleItem(sale)?.condition || ""]),
+    ...order.lines.flatMap((sale) => [sale.itemName, saleItem(sale)?.condition || "", saleCategory(sale)]),
   ));
   const shown = query.trim() ? matched : orders;
   const monthSales = salesList().filter((sale) => monthKey(sale.at) === monthKeyFromDate(new Date()));
@@ -1812,21 +1821,41 @@ function renderSales() {
   const message = salesList().length === 0
     ? "No orders yet."
     : "Nothing in this view.";
-  fillTable($("#saleRows"), shown, 7, message, (order) => {
+  fillTable($("#saleRows"), shown, 9, message, (order) => {
     const quantity = order.lines.reduce((sum, sale) => sum + sale.quantity, 0);
     const total = order.lines.reduce((sum, sale) => sum + saleTotal(sale), 0);
     const profit = order.lines.reduce((sum, sale) => sum + (sale.profit || 0), 0);
     const pending = order.lines.some(isPending);
-    const payment = pending ? `<span class="flag">COP/COD</span>` : "Cash/Bank Transfer";
+    const payment = pending
+      ? `<span class="pay pay-credit">COP/COD</span>`
+      : `<span class="pay pay-cash">Cash/Bank Transfer</span>`;
     const names = order.lines.map((sale) => {
       const qty = order.lines.length > 1 ? ` × ${sale.quantity}` : "";
-      return `<span>${esc(saleTitle(sale))}${qty}<span class="delta">${esc(holdText(holds.get(sale.id)))}</span></span>`;
+      return `<span class="order-line">${esc(saleTitle(sale))}${qty}</span>`;
+    }).join("");
+    const categories = order.lines.map((sale) => {
+      const item = saleItem(sale);
+      const current = item?.category || "General";
+      const title = esc(saleTitle(sale));
+      if (!item) return `<span class="order-line">${esc(current)}</span>`;
+      const values = SHOP_TYPES.includes(current) ? SHOP_TYPES : [current, ...SHOP_TYPES];
+      const options = values.map((value) => {
+        const selected = value === current ? " selected" : "";
+        return `<option value="${esc(value)}"${selected}>${esc(value)}</option>`;
+      }).join("");
+      return `<select class="cat-select" data-category="${esc(item.id)}" aria-label="Category of ${title}">${options}</select>`;
+    }).join("");
+    const deltas = order.lines.map((sale) => {
+      const days = holds.get(sale.id);
+      return `<span class="delta ${holdTone(days)}">${esc(holdText(days))}</span>`;
     }).join("");
     const label = esc(orderTitle(order.lines));
     const armed = saleDeleteArmedId === order.id;
     return `<tr>
       <td data-label="Date"><span><time datetime="${esc(order.at)}">${esc(formatWhen(order.at))}</time></span></td>
       <td class="order-names" data-label="">${names}</td>
+      <td class="order-cats" data-label="Category">${categories}</td>
+      <td class="order-deltas" data-label="Delta">${deltas}</td>
       <td class="num" data-label="Qty">${quantity}</td>
       <td class="num" data-label="Total">${money(total)}</td>
       <td class="num ${profitTone(profit)}" data-label="Profit">${money(profit)}</td>
@@ -3018,6 +3047,17 @@ function bind() {
     updateItemPreview();
   });
   $("#removeBtn").addEventListener("click", removeItem);
+
+  $("#saleRows").addEventListener("change", (event) => {
+    const select = event.target.closest("[data-category]");
+    if (!select) return;
+    const item = itemById(select.dataset.category);
+    if (!item || item.category === select.value) return;
+    item.category = select.value;
+    notify(`Classified ${item.name} as ${item.category}.`);
+    save();
+    render();
+  });
 
   $("#saleRows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-sale]");
