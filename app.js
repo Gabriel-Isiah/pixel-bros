@@ -4,6 +4,24 @@ const KEY = "bns-inventory-v1";
 const IMPORTED = "bns-imported-v1";
 const FUNDS_KEY = "bns-funds-adjustment";
 const TABLES = ["items", "movements", "expenses", "upcoming", "investors"];
+const SALE_TYPES = ["Game", "Hardware", "Accessory"];
+const SALE_TYPE_MARK = "\u241e";
+
+function splitSaleName(stored) {
+  const raw = String(stored || "");
+  const mark = raw.lastIndexOf(SALE_TYPE_MARK);
+  if (mark <= 0) return { name: raw, category: "" };
+  const name = raw.slice(0, mark);
+  const category = raw.slice(mark + SALE_TYPE_MARK.length).trim();
+  if (!name || !SALE_TYPES.includes(category)) return { name: raw, category: "" };
+  return { name, category };
+}
+
+function packSaleName(name, category) {
+  const clean = splitSaleName(name).name;
+  if (!SALE_TYPES.includes(category)) return clean;
+  return `${clean}${SALE_TYPE_MARK}${category}`;
+}
 
 const REMEMBER = "bns-remember";
 
@@ -364,16 +382,19 @@ function normalize(data) {
   for (const raw of data.movements) {
     if (!raw || !raw.itemName) continue;
     if (raw.type !== "buy" && raw.type !== "sell" && raw.type !== "recount") continue;
+    const named = splitSaleName(raw.itemName);
+    const category = SALE_TYPES.includes(raw.category) ? raw.category : named.category;
     movements.push({
       id: String(raw.id || uid()),
       type: raw.type,
       itemId: String(raw.itemId || ""),
-      itemName: String(raw.itemName),
+      itemName: named.name,
       quantity: Math.max(0, int(raw.quantity)),
       unitCost: raw.unitCost == null ? null : Math.round(Number(raw.unitCost) || 0),
       unitPrice: raw.unitPrice == null ? null : Math.round(Number(raw.unitPrice) || 0),
       profit: raw.profit == null ? null : Math.round(Number(raw.profit) || 0),
       at: String(raw.at || ""),
+      ...(raw.type === "sell" && category ? { category } : {}),
       ...(raw.type === "sell" && (raw.terms === "cop" || raw.terms === "cod") ? { terms: raw.terms } : {}),
     });
   }
@@ -443,7 +464,7 @@ function movementRow(movement, userId) {
     id: movement.id,
     type: movement.type,
     item_id: movement.itemId || "",
-    item_name: movement.itemName,
+    item_name: packSaleName(movement.itemName, movement.type === "sell" ? movement.category : ""),
     quantity: movement.quantity,
     unit_cost: movement.unitCost,
     unit_price: movement.unitPrice,
@@ -514,18 +535,22 @@ function fromRemote(table, rows) {
     });
   }
   if (table === "movements") {
-    return rows.map((row) => ({
+    return rows.map((row) => {
+      const named = splitSaleName(row.item_name);
+      return {
       id: row.id,
       type: row.type,
       itemId: row.item_id,
-      itemName: row.item_name,
+      itemName: named.name,
+      ...(row.type === "sell" && named.category ? { category: named.category } : {}),
       quantity: row.quantity,
       unitCost: row.unit_cost,
       unitPrice: row.unit_price,
       profit: row.profit,
       terms: row.terms,
       at: row.at,
-    }));
+      };
+    });
   }
   if (table === "investors") {
     return rows.map((row) => ({
@@ -1607,8 +1632,13 @@ function shownCategory(item) {
   return SHOP_TYPES.includes(bucket) ? bucket : current;
 }
 
-function categoryOptionsHTML(item) {
-  const selected = shownCategory(item);
+function typeChoice(record) {
+  const item = saleItem(record);
+  if (item) return shownCategory(item);
+  return shownCategory({ category: record?.category || "General" });
+}
+
+function typeOptionsHTML(selected) {
   const values = ITEM_TYPES.includes(selected) ? ITEM_TYPES : [selected, ...ITEM_TYPES];
   return values.map((value) => {
     const on = value === selected ? " selected" : "";
@@ -1616,12 +1646,19 @@ function categoryOptionsHTML(item) {
   }).join("");
 }
 
-function categorySelectHTML(item, title) {
-  return `<select class="cat-select" data-category="${esc(item.id)}" aria-label="Type of ${esc(title)}">${categoryOptionsHTML(item)}</select>`;
+function typeSelectHTML(record, title) {
+  const item = saleItem(record);
+  const selected = typeChoice(record);
+  const target = item
+    ? `data-type-item="${esc(item.id)}"`
+    : record?.lineId
+      ? `data-type-line="${esc(record.lineId)}"`
+      : `data-type-sale="${esc(record.id)}"`;
+  return `<select class="cat-select" ${target} aria-label="Type of ${esc(title)}">${typeOptionsHTML(selected)}</select>`;
 }
 
-function categoryMenu(item, title) {
-  return `<label class="order-category"><span>Type</span><select data-category="${esc(item.id)}" aria-label="Type of ${esc(title)}">${categoryOptionsHTML(item)}</select></label>`;
+function typeMenu(record, title) {
+  return `<label class="order-category"><span>Type</span>${typeSelectHTML(record, title)}</label>`;
 }
 
 function applyShopType(item, value) {
@@ -1633,16 +1670,63 @@ function applyShopType(item, value) {
   return true;
 }
 
+function assignSaleType(name, category) {
+  for (const sale of salesList()) {
+    if (saleItem(sale) || sale.itemName !== name) continue;
+    sale.category = category;
+  }
+  if (!orderDraft) return;
+  for (const line of orderDraft.lines) {
+    if (saleItem(line) || line.itemName !== name) continue;
+    line.category = category;
+  }
+}
+
+function refreshTypeSelects() {
+  for (const select of document.querySelectorAll("[data-type-item], [data-type-sale], [data-type-line]")) {
+    if (select.dataset.typeItem) {
+      const item = itemById(select.dataset.typeItem);
+      if (item) select.value = shownCategory(item);
+      continue;
+    }
+    if (select.dataset.typeSale) {
+      const sale = state.movements.find((row) => row.id === select.dataset.typeSale);
+      if (sale) select.value = typeChoice(sale);
+      continue;
+    }
+    const line = orderDraft?.lines.find((row) => row.lineId === select.dataset.typeLine);
+    if (line) select.value = typeChoice(line);
+  }
+}
+
 function commitCategory(field) {
-  const item = itemById(field.dataset.category);
-  if (!item || !applyShopType(item, field.value)) {
-    if (item) field.value = shownCategory(item);
+  const next = ITEM_TYPES.find((type) => type.toLowerCase() === String(field.value || "").trim().toLowerCase());
+  if (!next) {
+    refreshTypeSelects();
     return;
   }
-  for (const other of document.querySelectorAll(`[data-category="${CSS.escape(item.id)}"]`)) {
-    other.value = item.category;
+  const item = itemById(field.dataset.typeItem);
+  if (item) {
+    if (!applyShopType(item, next)) {
+      refreshTypeSelects();
+      return;
+    }
+    refreshTypeSelects();
+    notify(`Type of ${item.name} is now ${item.category}.`);
+    save();
+    render();
+    return;
   }
-  notify(`Type of ${item.name} is now ${item.category}.`);
+  const line = orderDraft?.lines.find((row) => row.lineId === field.dataset.typeLine);
+  const sale = state.movements.find((row) => row.id === field.dataset.typeSale);
+  const source = line || sale;
+  if (!source || typeChoice(source) === next) {
+    refreshTypeSelects();
+    return;
+  }
+  assignSaleType(source.itemName, next);
+  refreshTypeSelects();
+  notify(`Type of ${source.itemName} is now ${next}.`);
   save();
   render();
 }
@@ -1865,7 +1949,9 @@ function paintProfit(el, amount) {
 }
 
 function saleCategory(sale) {
-  return saleItem(sale)?.category || "General";
+  const item = saleItem(sale);
+  if (item) return item.category || "General";
+  return sale.category || "General";
 }
 
 function renderSales() {
@@ -1875,7 +1961,7 @@ function renderSales() {
     query,
     ...order.lines.flatMap((sale) => {
       const item = saleItem(sale);
-      return [sale.itemName, item?.condition || "", item?.category || "", item?.series || ""];
+      return [sale.itemName, item?.condition || "", item?.category || sale.category || "", item?.series || ""];
     }),
   ));
   const shown = query.trim() ? matched : orders;
@@ -1909,11 +1995,7 @@ function renderSales() {
       const qty = order.lines.length > 1 ? ` × ${sale.quantity}` : "";
       return `<span class="order-line">${esc(saleTitle(sale))}${qty}</span>`;
     }).join("");
-    const categories = order.lines.map((sale) => {
-      const item = saleItem(sale);
-      if (!item) return `<span class="order-line">General</span>`;
-      return categorySelectHTML(item, saleTitle(sale));
-    }).join("");
+    const categories = order.lines.map((sale) => typeSelectHTML(sale, saleTitle(sale))).join("");
     const deltas = order.lines.map((sale) => {
       const days = holds.get(sale.id);
       return `<span class="delta ${holdTone(days)}">${esc(holdText(days))}</span>`;
@@ -2043,7 +2125,7 @@ function render() {
   renderInvestors();
 }
 
-const ITEM_TYPES = ["Game", "Hardware", "Accessory"];
+const ITEM_TYPES = SALE_TYPES;
 
 const ITEM_CONDITIONS = {
   Game: ["Complete w/ Case", "Cartridge Only"],
@@ -2291,6 +2373,7 @@ function lineFromSale(sale) {
     unitPrice: sale.unitPrice || 0,
     unitCost: sale.unitCost || 0,
     held: sale.quantity,
+    category: sale.category || "",
   };
 }
 
@@ -2339,13 +2422,12 @@ function renderOrderEditor() {
       const meta = item
         ? `${available} available · cost ${money(line.unitCost || 0)}`
         : `Recorded cost ${money(line.unitCost || 0)}`;
-      const category = item ? categoryMenu(item, saleTitle(line)) : "";
       return `<li data-line="${esc(line.lineId)}">
         <div class="order-about">
           <p class="order-title">${esc(saleTitle(line))}</p>
           <p class="order-meta">${esc(meta)}</p>
         </div>
-        ${category}
+        ${typeMenu(line, saleTitle(line))}
         <label>
           <span>Qty</span>
           <input data-field="qty" type="number" min="1" max="${available}" step="1" inputmode="numeric" value="${line.quantity}" aria-label="Quantity of ${esc(saleTitle(line))}">
@@ -2522,6 +2604,7 @@ function onSellSubmit(event) {
       unitPrice: line.unitPrice,
       profit: ((line.unitPrice || 0) - (line.unitCost || 0)) * line.quantity,
       at,
+      ...(!item && line.category ? { category: line.category } : {}),
       ...(terms ? { terms } : {}),
     });
     if (item) flash(item.id);
@@ -3121,7 +3204,7 @@ function bind() {
   $("#removeBtn").addEventListener("click", removeItem);
 
   function onCategoryField(event) {
-    const field = event.target.closest("[data-category]");
+    const field = event.target.closest("[data-type-item], [data-type-sale], [data-type-line]");
     if (!field || (field.tagName !== "INPUT" && field.tagName !== "SELECT")) return;
     if (field.tagName === "SELECT" && event.type !== "change") return;
     commitCategory(field);

@@ -1085,12 +1085,15 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
 
 .order-lines li {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(128px, 160px) 72px 112px auto;
+  grid-template-columns: minmax(0, 1fr) 88px 120px auto;
   gap: 10px 12px;
   align-items: end;
   padding: 14px 0;
   border-bottom: 1px solid var(--line);
 }
+
+.order-lines .order-about,
+.order-lines .order-category { grid-column: 1 / -1; }
 
 .order-lines li.empty {
   display: block;
@@ -1162,7 +1165,10 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   outline: 0;
 }
 
-.order-category select { cursor: pointer; }
+.order-category select {
+  width: 100%;
+  cursor: pointer;
+}
 
 .order-deltas .delta {
   font-variant-numeric: tabular-nums;
@@ -1384,6 +1390,7 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
   .order-lines li { grid-template-columns: 1fr 1fr; }
 
   .order-lines .order-about,
+  .order-lines .order-category,
   .order-lines li .quiet { grid-column: 1 / -1; }
 
   .order-add { flex-wrap: wrap; }
