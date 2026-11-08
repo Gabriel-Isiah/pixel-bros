@@ -1609,7 +1609,7 @@ function shownCategory(item) {
 
 function categoryOptionsHTML(item) {
   const selected = shownCategory(item);
-  const values = SHOP_TYPES.includes(selected) ? SHOP_TYPES : [selected, ...SHOP_TYPES];
+  const values = ITEM_TYPES.includes(selected) ? ITEM_TYPES : [selected, ...ITEM_TYPES];
   return values.map((value) => {
     const on = value === selected ? " selected" : "";
     return `<option value="${esc(value)}"${on}>${esc(value)}</option>`;
@@ -1617,15 +1617,15 @@ function categoryOptionsHTML(item) {
 }
 
 function categorySelectHTML(item, title) {
-  return `<select class="cat-select" data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${categoryOptionsHTML(item)}</select>`;
+  return `<select class="cat-select" data-category="${esc(item.id)}" aria-label="Type of ${esc(title)}">${categoryOptionsHTML(item)}</select>`;
 }
 
 function categoryMenu(item, title) {
-  return `<label class="order-category"><span>Category</span><select data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${categoryOptionsHTML(item)}</select></label>`;
+  return `<label class="order-category"><span>Type</span><select data-category="${esc(item.id)}" aria-label="Type of ${esc(title)}">${categoryOptionsHTML(item)}</select></label>`;
 }
 
 function applyShopType(item, value) {
-  const next = SHOP_TYPES.find((type) => type.toLowerCase() === String(value || "").trim().toLowerCase());
+  const next = ITEM_TYPES.find((type) => type.toLowerCase() === String(value || "").trim().toLowerCase());
   if (!next) return false;
   if (item.category === next && !String(item.series || "").trim()) return false;
   item.category = next;
@@ -1642,7 +1642,7 @@ function commitCategory(field) {
   for (const other of document.querySelectorAll(`[data-category="${CSS.escape(item.id)}"]`)) {
     other.value = item.category;
   }
-  notify(`Classified ${item.name} as ${item.category}.`);
+  notify(`Type of ${item.name} is now ${item.category}.`);
   save();
   render();
 }
@@ -1923,7 +1923,7 @@ function renderSales() {
     return `<tr>
       <td data-label="Date"><span><time datetime="${esc(order.at)}">${esc(formatWhen(order.at))}</time></span></td>
       <td class="order-names" data-label="">${names}</td>
-      <td class="order-cats" data-label="Category">${categories}</td>
+      <td class="order-cats" data-label="Type">${categories}</td>
       <td class="order-deltas" data-label="Delta">${deltas}</td>
       <td class="num" data-label="Qty">${quantity}</td>
       <td class="num" data-label="Total">${money(total)}</td>
