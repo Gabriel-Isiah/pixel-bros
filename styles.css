@@ -1133,38 +1133,33 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
 }
 
 .order-names .order-line,
-.order-deltas .delta,
-.order-cats .cat-pair {
+.order-deltas .delta {
   display: flex;
   align-items: center;
   min-height: 34px;
 }
 
-.order-cats .cat-pair { gap: 8px; }
-
-.order-cats .cat-edit {
+.order-cats .cat-select {
+  display: block;
   font: inherit;
   font-size: 14px;
   color: var(--ink);
   width: 100%;
-  max-width: 168px;
-  background: transparent;
+  min-width: 148px;
+  max-width: 220px;
+  min-height: 34px;
+  background-color: transparent;
   border: 0;
   border-bottom: 1px solid rgba(47, 78, 60, 0.28);
   border-radius: 0;
-  padding: 4px 16px 4px 0;
+  padding: 4px 8px 4px 0;
+  cursor: pointer;
 }
 
-.order-cats .cat-edit:focus {
+.order-cats .cat-select:focus {
   border-bottom-color: var(--gold);
   box-shadow: 0 1px 0 var(--gold);
   outline: 0;
-}
-
-.cat-type {
-  flex: none;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .line-category {
@@ -1366,6 +1361,16 @@ dialog[open]::backdrop { animation: fade-in 0.32s ease; }
     align-items: baseline;
     white-space: normal;
     padding-top: 8px;
+  }
+
+  td.order-cats {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  td.order-cats .cat-select {
+    flex: 1 1 160px;
+    max-width: none;
   }
 
   .qty-wrap { justify-content: flex-end; }

@@ -1635,29 +1635,6 @@ function applyCategoryEdit(item, raw) {
   return true;
 }
 
-function categorySuggestions() {
-  const values = new Set(SHOP_TYPES);
-  for (const [, label] of SERIES) values.add(label);
-  for (const item of state.items) {
-    const category = String(item.category || "").trim();
-    const series = String(item.series || "").trim();
-    if (category) values.add(category);
-    if (series) values.add(series);
-  }
-  const extras = [...values].filter((value) => !SHOP_TYPES.includes(value));
-  extras.sort((a, b) => a.localeCompare(b));
-  return [...SHOP_TYPES, ...extras];
-}
-
-function fillSaleCategories() {
-  const list = $("#saleCategories");
-  if (!list) return;
-  const html = categorySuggestions().map((value) => `<option value="${esc(value)}"></option>`).join("");
-  if (list.dataset.stamp === html) return;
-  list.dataset.stamp = html;
-  list.innerHTML = html;
-}
-
 function categoryChoiceValue(type, series) {
   const name = String(series || "").trim();
   return name ? `${type}\u001f${name}` : String(type || "General");
@@ -1682,7 +1659,7 @@ function applyCategoryChoice(item, value) {
   return true;
 }
 
-function categoryMenu(item, title) {
+function categoryOptionsHTML(item) {
   const groups = new Map(SHOP_TYPES.map((type) => [type, new Set([type])]));
   const other = new Set();
   const add = (type, label) => {
@@ -1716,7 +1693,15 @@ function categoryMenu(item, title) {
   const more = extras.length
     ? `<optgroup label="Other">${extras.map((name) => option(name, "")).join("")}</optgroup>`
     : "";
-  return `<label class="line-category"><span>Category</span><select data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${sections}${more}</select></label>`;
+  return `${sections}${more}`;
+}
+
+function categorySelectHTML(item, title) {
+  return `<select class="cat-select" data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${categoryOptionsHTML(item)}</select>`;
+}
+
+function categoryMenu(item, title) {
+  return `<label class="line-category"><span>Category</span><select data-category="${esc(item.id)}" aria-label="Category of ${esc(title)}">${categoryOptionsHTML(item)}</select></label>`;
 }
 
 function syncCategoryFields(item) {
@@ -1993,7 +1978,6 @@ function renderSales() {
   const message = salesList().length === 0
     ? "No orders yet."
     : "Nothing in this view.";
-  fillSaleCategories();
   fillTable($("#saleRows"), shown, 9, message, (order) => {
     const quantity = order.lines.reduce((sum, sale) => sum + sale.quantity, 0);
     const total = order.lines.reduce((sum, sale) => sum + saleTotal(sale), 0);
@@ -2008,13 +1992,8 @@ function renderSales() {
     }).join("");
     const categories = order.lines.map((sale) => {
       const item = saleItem(sale);
-      const title = esc(saleTitle(sale));
       if (!item) return `<span class="order-line">General</span>`;
-      const value = esc(categoryEditorValue(item));
-      const section = item.series && SHOP_TYPES.includes(typeBucket(item.category))
-        ? `<span class="cat-type">${esc(typeBucket(item.category))}</span>`
-        : "";
-      return `<span class="cat-pair"><input class="cat-edit" data-category="${esc(item.id)}" list="saleCategories" value="${value}" autocomplete="off" aria-label="Category of ${title}">${section}</span>`;
+      return categorySelectHTML(item, saleTitle(sale));
     }).join("");
     const deltas = order.lines.map((sale) => {
       const days = holds.get(sale.id);
@@ -2431,7 +2410,6 @@ function updateOrderPreview() {
 }
 
 function renderOrderEditor() {
-  fillSaleCategories();
   const list = $("#orderLines");
   if (!orderDraft.lines.length) {
     list.innerHTML = `<li class="empty">Add a game to this order.</li>`;
@@ -3226,6 +3204,7 @@ function bind() {
   function onCategoryField(event) {
     const field = event.target.closest("[data-category]");
     if (!field || (field.tagName !== "INPUT" && field.tagName !== "SELECT")) return;
+    if (field.tagName === "SELECT" && event.type !== "change") return;
     commitCategory(field);
   }
   $("#saleRows").addEventListener("change", onCategoryField);
