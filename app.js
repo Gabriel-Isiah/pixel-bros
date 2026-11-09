@@ -369,6 +369,7 @@ function normalize(data) {
       name: String(raw.name),
       category: String(raw.series ? raw.category : unpacked.category),
       series: String(raw.series || unpacked.series || "").trim(),
+      platform: raw.platform === "NS1" || raw.platform === "NS2" ? raw.platform : unpacked.platform || "",
       condition: String(raw.condition || ""),
       quantity: Math.max(0, int(raw.quantity)),
       cost: Math.max(0, Math.round(Number(raw.cost) || 0)),
@@ -525,6 +526,7 @@ function fromRemote(table, rows) {
       name: row.name,
       category: unpacked.category,
       series: unpacked.series,
+      platform: unpacked.platform || "",
       condition: row.condition || "",
       quantity: row.quantity,
       cost: row.cost,
@@ -903,7 +905,7 @@ function stats() {
 function matchesQuery(item) {
   const query = ui.query.trim().toLowerCase();
   if (!query) return true;
-  return `${item.name} ${item.category} ${item.series || ""} ${item.condition || ""} ${item.notes}`.toLowerCase().includes(query);
+  return `${item.name} ${item.category} ${item.series || ""} ${item.platform || ""} ${switchVersion(item)} ${item.condition || ""} ${item.notes}`.toLowerCase().includes(query);
 }
 
 function visibleItems() {
@@ -943,7 +945,8 @@ function rowHTML(item) {
     ui.flashId === item.id ? "flash" : "",
   ].filter(Boolean).join(" ");
   const id = esc(item.id);
-  const name = esc(item.name);
+  const version = switchVersion(item);
+  const name = esc(gameLabel(item.name, version));
   const armed = deleteArmedId === item.id;
   const waitingSales = pendingOrderSales(item);
   const waiting = waitingSales.reduce((sum, sale) => sum + saleTotal(sale), 0);
@@ -953,7 +956,10 @@ function rowHTML(item) {
 
   return `<tr data-id="${id}" class="${classes}">
     <td class="item" data-label="">
-      <button type="button" class="item-name" data-action="edit" data-id="${id}">${name}</button>
+      <span class="item-title">
+        <button type="button" class="item-name" data-action="edit" data-id="${id}">${name}</button>
+        ${switchTag(item)}
+      </span>
     </td>
     <td data-label="Type">${esc(item.category)}</td>
     <td data-label="Condition">${esc(item.condition || "—")}</td>
@@ -1607,23 +1613,69 @@ function holdNote(hold) {
 
 const SHOP_TYPES = ["Game", "Hardware", "Accessory"];
 const SERIES_MARK = " · ";
+const PLATFORM_MARK = "\u241f";
+
+function versionFromName(name) {
+  const text = String(name || "");
+  if (/\b(?:ns\s*2|switch\s*2)\b/i.test(text)) return "NS2";
+  if (/\bns\s*1\b/i.test(text)) return "NS1";
+  return "";
+}
+
+function switchVersion(item) {
+  if (typeBucket(item?.category) !== "Game") return "";
+  if (item.platform === "NS1" || item.platform === "NS2") return item.platform;
+  return versionFromName(item.name);
+}
+
+function gameLabel(name, version) {
+  const pattern = version === "NS2"
+    ? /\s*(?:[\[(]\s*)?(?:ns\s*2|switch\s*2)(?:\s*[\])])?\s*$/i
+    : version === "NS1"
+      ? /\s*(?:[\[(]\s*)?ns\s*1(?:\s*[\])])?\s*$/i
+      : null;
+  if (!pattern) return String(name || "");
+  const stripped = String(name || "").replace(pattern, "").trim();
+  return stripped || String(name || "");
+}
+
+function switchTag(item) {
+  const version = switchVersion(item);
+  if (!version) return "";
+  const tone = version === "NS2" ? "ns2" : "ns1";
+  return `<span class="switch-tag ${tone}">${version}</span>`;
+}
 
 function packCategory(item) {
   const category = String(item?.category || "General").trim() || "General";
   const series = String(item?.series || "").trim();
-  if (!series || !SHOP_TYPES.includes(typeBucket(category))) return category;
-  return `${category}${SERIES_MARK}${series}`;
+  let stored = !series || !SHOP_TYPES.includes(typeBucket(category))
+    ? category
+    : `${category}${SERIES_MARK}${series}`;
+  const platform = item?.platform === "NS1" || item?.platform === "NS2" ? item.platform : "";
+  if (platform && typeBucket(category) === "Game") stored += `${PLATFORM_MARK}${platform}`;
+  return stored;
 }
 
 function unpackCategory(stored) {
-  const raw = String(stored || "").trim() || "General";
+  const rawAll = String(stored || "").trim() || "General";
+  let platform = "";
+  let raw = rawAll;
+  const platformAt = rawAll.lastIndexOf(PLATFORM_MARK);
+  if (platformAt > 0) {
+    const maybe = rawAll.slice(platformAt + PLATFORM_MARK.length).trim();
+    if (maybe === "NS1" || maybe === "NS2") {
+      platform = maybe;
+      raw = rawAll.slice(0, platformAt).trim() || "General";
+    }
+  }
   const mark = raw.indexOf(SERIES_MARK);
   if (mark > 0) {
     const category = typeBucket(raw.slice(0, mark));
     const series = raw.slice(mark + SERIES_MARK.length).trim();
-    if (series && SHOP_TYPES.includes(category)) return { category, series };
+    if (series && SHOP_TYPES.includes(category)) return { category, series, platform };
   }
-  return { category: raw, series: "" };
+  return { category: raw, series: "", platform };
 }
 
 function shownCategory(item) {
@@ -2159,6 +2211,16 @@ function fillConditions(type, selected) {
   select.value = selected && values.includes(selected) ? selected : options[0];
 }
 
+function fillVersion(type, selected) {
+  const field = $("#field-version");
+  const select = $("#itemForm").platform;
+  const game = typeBucket(type) === "Game";
+  field.hidden = !game;
+  select.disabled = !game;
+  if (!game) return;
+  select.value = selected === "NS1" || selected === "NS2" ? selected : "";
+}
+
 function setRemoveArmed(armed) {
   removeArmed = armed;
   const button = $("#removeBtn");
@@ -2206,12 +2268,14 @@ function openItemDialog(id, focusPrice = false) {
     form.quantity.value = String(item.quantity);
     fillTypes(item.category);
     fillConditions(form.category.value, item.condition || "");
+    fillVersion(form.category.value, item.platform || versionFromName(item.name));
     form.cost.value = (item.cost / 100).toFixed(2);
     form.price.value = (item.price / 100).toFixed(2);
     form.notes.value = item.notes;
   } else {
     fillTypes("Game");
     fillConditions("Game", "");
+    fillVersion("Game", "NS1");
   }
 
   updateItemPreview();
@@ -2243,6 +2307,7 @@ function readItemForm(form) {
     category: type,
     series: existing && existing.category === type ? String(existing.series || "").trim() : "",
     condition: hasCondition ? form.condition.value : "",
+    platform: typeBucket(type) === "Game" && (form.platform.value === "NS1" || form.platform.value === "NS2") ? form.platform.value : "",
     quantity: existing ? Math.max(0, int(form.quantity.value)) : Math.max(1, int(form.quantity.value)),
     cost: Math.max(0, cents(form.cost.value)),
     price: Math.max(0, cents(form.price.value)),
@@ -3197,7 +3262,17 @@ function bind() {
     if (event.target.name === "name" || event.target.name === "category" || event.target.name === "condition" || event.target.name === "quantity") {
       event.target.setCustomValidity("");
     }
-    if (event.target.name === "category") fillConditions(event.target.value, "");
+    if (event.target.name === "category") {
+      fillConditions(event.target.value, "");
+      const form = event.currentTarget;
+      const detected = versionFromName(form.elements.name.value);
+      const chosen = form.elements.platform.value;
+      fillVersion(event.target.value, chosen === "NS1" || chosen === "NS2" ? chosen : detected);
+    }
+    if (event.target.name === "name") {
+      const detected = versionFromName(event.target.value);
+      if (detected && !$("#field-version").hidden) event.currentTarget.elements.platform.value = detected;
+    }
     setRemoveArmed(false);
     updateItemPreview();
   });
