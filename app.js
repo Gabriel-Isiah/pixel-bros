@@ -364,6 +364,9 @@ function normalize(data) {
   for (const raw of data.items) {
     if (!raw || raw.id == null || !raw.name) continue;
     const unpacked = unpackCategory(raw.category);
+    const held = unpackNotes(raw.notes);
+    const fulfillOn = /^\d{4}-\d{2}-\d{2}$/.test(raw.fulfillOn || "") ? raw.fulfillOn : held.fulfillOn;
+    const reserved = raw.reserved === true || held.reserved || Boolean(fulfillOn);
     items.push({
       id: String(raw.id),
       name: String(raw.name),
@@ -375,7 +378,9 @@ function normalize(data) {
       cost: Math.max(0, Math.round(Number(raw.cost) || 0)),
       price: Math.max(0, Math.round(Number(raw.price) || 0)),
       reorderAt: Math.max(0, int(raw.reorderAt)),
-      notes: String(raw.notes || ""),
+      notes: held.notes,
+      reserved,
+      fulfillOn: reserved ? fulfillOn : "",
     });
   }
 
@@ -444,6 +449,26 @@ function ledgerIsEmpty(ledger) {
   return TABLES.every((table) => ledger[table].length === 0);
 }
 
+const RESERVE_MARK = "\u241e";
+
+function unpackNotes(stored) {
+  const raw = String(stored || "");
+  const mark = raw.lastIndexOf(RESERVE_MARK);
+  if (mark < 0) return { notes: raw, reserved: false, fulfillOn: "" };
+  const notes = raw.slice(0, mark);
+  const [flag, date] = raw.slice(mark + RESERVE_MARK.length).split("|");
+  const fulfillOn = /^\d{4}-\d{2}-\d{2}$/.test(date || "") ? date : "";
+  if (flag !== "0" && flag !== "1") return { notes: raw, reserved: false, fulfillOn: "" };
+  return { notes, reserved: flag === "1" || Boolean(fulfillOn), fulfillOn };
+}
+
+function packNotes(item) {
+  const notes = unpackNotes(item?.notes).notes;
+  const fulfillOn = /^\d{4}-\d{2}-\d{2}$/.test(item?.fulfillOn || "") ? item.fulfillOn : "";
+  if (!item?.reserved && !fulfillOn) return notes;
+  return `${notes}${RESERVE_MARK}${item?.reserved ? "1" : "0"}|${fulfillOn}`;
+}
+
 function itemRow(item, userId) {
   return {
     user_id: userId,
@@ -455,7 +480,7 @@ function itemRow(item, userId) {
     cost: item.cost,
     price: item.price,
     reorder_at: item.reorderAt,
-    notes: item.notes,
+    notes: packNotes(item),
   };
 }
 
@@ -905,7 +930,7 @@ function stats() {
 function matchesQuery(item) {
   const query = ui.query.trim().toLowerCase();
   if (!query) return true;
-  return `${item.name} ${item.category} ${item.series || ""} ${item.platform || ""} ${switchVersion(item)} ${item.condition || ""} ${item.notes}`.toLowerCase().includes(query);
+  return `${item.name} ${item.category} ${item.series || ""} ${item.platform || ""} ${switchVersion(item)} ${item.condition || ""} ${item.notes} ${item.reserved ? "reserved" : ""} ${item.fulfillOn || ""}`.toLowerCase().includes(query);
 }
 
 function visibleItems() {
@@ -917,7 +942,14 @@ function visibleItems() {
     if (ui.sort === "name") cmp = a.name.localeCompare(b.name);
     else if (ui.sort === "type") cmp = a.category.localeCompare(b.category);
     else if (ui.sort === "condition") cmp = (a.condition || "").localeCompare(b.condition || "");
-    else if (ui.sort === "quantity") cmp = a.quantity - b.quantity;
+    else if (ui.sort === "reprice") {
+      const left = repriceWait(a);
+      const right = repriceWait(b);
+      if (left == null && right == null) cmp = 0;
+      else if (left == null) return 1;
+      else if (right == null) return -1;
+      else cmp = left - right;
+    }
     else if (ui.sort === "cost") cmp = a.cost - b.cost;
     else if (ui.sort === "price") cmp = a.price - b.price;
     else if (ui.sort === "profit") cmp = (a.price - a.cost) - (b.price - b.cost);
@@ -933,13 +965,6 @@ const ICON_TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><pa
 function rowHTML(item) {
   const status = statusOf(item);
   const profit = item.price - item.cost;
-  const flag = status === "low"
-    ? '<span class="flag">Low</span>'
-    : status === "out"
-      ? '<span class="flag out">Out</span>'
-      : "";
-  const cut = dueCuts.find((row) => row.item.id === item.id);
-  const cutFlag = cut ? `<span class="flag">Cut</span>` : "";
   const classes = [
     status === "ok" ? "" : `is-${status}`,
     ui.flashId === item.id ? "flash" : "",
@@ -953,17 +978,33 @@ function rowHTML(item) {
   const credit = waiting > 0
     ? `<button type="button" class="credit-act" data-action="credit" data-id="${id}" aria-label="Credit ${money(waiting)} for ${esc(orderTitle(waitingSales))}">Credit ${money(waiting)}</button>`
     : "";
+  const reserved = item.reserved
+    ? `<button type="button" class="reserve-tag on" data-action="reserve" data-id="${id}" aria-pressed="true">Reserved</button>`
+    : `<button type="button" class="reserve-tag" data-action="reserve" data-id="${id}" aria-pressed="false">Reserve</button>`;
+  const ship = item.reserved
+    ? `<label class="reserve-when"><span>Sell / ship</span><input type="date" data-fulfill="${id}" value="${esc(item.fulfillOn || "")}" aria-label="Date to sell or ship ${name}"></label>`
+    : "";
+  const wait = repriceWait(item);
+  const age = stockAgeById.get(item.id);
+  const repriceTitle = wait == null
+    ? "No stock to reprice."
+    : wait === 0
+      ? `Price cut is due. In stock ${age} days.`
+      : `${wait} ${wait === 1 ? "day" : "days"} until the weekly price cut. In stock ${age} days.`;
+  const reprice = wait == null ? "—" : wait === 0 ? "Due" : String(wait);
 
   return `<tr data-id="${id}" class="${classes}">
     <td class="item" data-label="">
       <span class="item-title">
         <button type="button" class="item-name" data-action="edit" data-id="${id}">${name}</button>
         ${switchTag(item)}
+        ${reserved}
       </span>
+      ${ship}
     </td>
     <td data-label="Type">${esc(item.category)}</td>
     <td data-label="Condition">${esc(item.condition || "—")}</td>
-    <td class="num" data-label="On hand"><span class="qty-wrap">${item.quantity}${flag}${cutFlag}</span></td>
+    <td class="num${wait === 0 ? " reprice-due" : ""}" data-label="Days to reprice" title="${esc(repriceTitle)}">${reprice}</td>
     <td class="num" data-label="Buy">${money(item.cost)}</td>
     <td class="num" data-label="Sell">${money(item.price)}</td>
     <td class="num${profit < 0 ? " neg" : ""}" data-label="Profit">${money(profit)}</td>
@@ -1476,7 +1517,9 @@ function eachHoldTake(onTake, onLeft, onRemain) {
   }
 }
 
-function priceCuts() {
+let stockAgeById = new Map();
+
+function stockAges() {
   const oldest = new Map();
   eachHoldTake(() => {}, () => {}, (lot) => {
     const key = lot.itemId || lot.itemName;
@@ -1484,13 +1527,37 @@ function priceCuts() {
     if (!current || String(lot.at) < String(current.at)) oldest.set(key, lot);
   });
   const now = new Date().toISOString();
-  const due = [];
+  const ages = new Map();
   for (const lot of oldest.values()) {
     const item = (lot.itemId && itemById(lot.itemId))
       || state.items.find((entry) => entry.name === lot.itemName);
-    if (!item || item.quantity <= 0) continue;
+    if (!item) continue;
     const days = calendarDaysBetween(lot.at, now);
-    if (days == null || days < 7) continue;
+    if (days == null || days < 0) continue;
+    const known = ages.get(item.id);
+    if (known == null || days > known) ages.set(item.id, days);
+  }
+  return ages;
+}
+
+function daysUntilReprice(daysInStock) {
+  const intoWeek = daysInStock % 7;
+  if (daysInStock > 0 && intoWeek === 0) return 0;
+  return 7 - intoWeek;
+}
+
+function repriceWait(item) {
+  if (!item || item.quantity <= 0) return null;
+  const days = stockAgeById.get(item.id);
+  if (days == null) return null;
+  return daysUntilReprice(days);
+}
+
+function priceCuts() {
+  const due = [];
+  for (const [id, days] of stockAgeById) {
+    const item = itemById(id);
+    if (!item || item.quantity <= 0 || days < 7) continue;
     due.push({ item, days, weeks: Math.floor(days / 7) });
   }
   due.sort((a, b) => b.days - a.days || a.item.name.localeCompare(b.item.name));
@@ -2164,6 +2231,7 @@ function renderInvestors() {
 }
 
 function render() {
+  stockAgeById = stockAges();
   dueCuts = priceCuts();
   renderChrome();
   renderDashboard();
@@ -2272,10 +2340,12 @@ function openItemDialog(id, focusPrice = false) {
     form.cost.value = (item.cost / 100).toFixed(2);
     form.price.value = (item.price / 100).toFixed(2);
     form.notes.value = item.notes;
+    setReserveFields(item);
   } else {
     fillTypes("Game");
     fillConditions("Game", "");
     fillVersion("Game", "NS1");
+    setReserveFields(null);
   }
 
   updateItemPreview();
@@ -2313,7 +2383,16 @@ function readItemForm(form) {
     price: Math.max(0, cents(form.price.value)),
     reorderAt: existing ? existing.reorderAt : 0,
     notes: form.notes.value.trim(),
+    reserved: form.reserved.checked,
+    fulfillOn: form.reserved.checked && /^\d{4}-\d{2}-\d{2}$/.test(form.fulfillOn.value) ? form.fulfillOn.value : "",
   };
+}
+
+function setReserveFields(item) {
+  const form = $("#itemForm");
+  form.reserved.checked = Boolean(item?.reserved);
+  form.fulfillOn.value = item?.fulfillOn || "";
+  $("#field-fulfill").hidden = !form.reserved.checked;
 }
 
 function onItemSubmit(event) {
@@ -3206,7 +3285,7 @@ function bind() {
     if (ui.sort === key) ui.dir = ui.dir === "asc" ? "desc" : "asc";
     else {
       ui.sort = key;
-      ui.dir = key === "name" ? "asc" : "desc";
+      ui.dir = key === "name" || key === "reprice" ? "asc" : "desc";
     }
     render();
   });
@@ -3228,6 +3307,18 @@ function bind() {
   $("#creditForm").addEventListener("submit", onCreditSubmit);
   $("#fundsForm").addEventListener("submit", onFundsSubmit);
 
+  $("#rows").addEventListener("change", (event) => {
+    const input = event.target.closest("[data-fulfill]");
+    if (!input) return;
+    const item = itemById(input.dataset.fulfill);
+    if (!item) return;
+    item.reserved = true;
+    item.fulfillOn = /^\d{4}-\d{2}-\d{2}$/.test(input.value) ? input.value : "";
+    notify(item.fulfillOn ? `${item.name} is reserved for ${formatDay(item.fulfillOn)}.` : `${item.name} is reserved.`);
+    save();
+    render();
+  });
+
   $("#panel-inventory").addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button || button.disabled) return;
@@ -3241,6 +3332,16 @@ function bind() {
       deleteArmedId = null;
       movementDeleteArmedId = null;
       creditItem(id);
+      return;
+    }
+    if (action === "reserve") {
+      const item = itemById(id);
+      if (!item) return;
+      item.reserved = !item.reserved;
+      if (!item.reserved) item.fulfillOn = "";
+      notify(item.reserved ? `${item.name} is reserved.` : `${item.name} is no longer reserved.`);
+      save();
+      render();
       return;
     }
     const wasArmed = deleteArmedId != null || movementDeleteArmedId != null;
@@ -3273,6 +3374,7 @@ function bind() {
       const detected = versionFromName(event.target.value);
       if (detected && !$("#field-version").hidden) event.currentTarget.elements.platform.value = detected;
     }
+    if (event.target.name === "reserved") $("#field-fulfill").hidden = !event.target.checked;
     setRemoveArmed(false);
     updateItemPreview();
   });
