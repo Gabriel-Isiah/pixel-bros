@@ -71,6 +71,7 @@
       <button type="button" class="tab" id="tab-expenses" role="tab" data-tab="expenses" aria-selected="false" aria-controls="panel-expenses">Expenses</button>
       <button type="button" class="tab" id="tab-upcoming" role="tab" data-tab="upcoming" aria-selected="false" aria-controls="panel-upcoming">Upcoming expenses</button>
       <button type="button" class="tab" id="tab-investors" role="tab" data-tab="investors" aria-selected="false" aria-controls="panel-investors">Investors</button>
+      <button type="button" class="tab" id="tab-history" role="tab" data-tab="history" aria-selected="false" aria-controls="panel-history">History</button>
     </nav>
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
 
@@ -333,6 +334,50 @@
             </tr>
           </thead>
           <tbody id="investorRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="panel-history" class="panel" role="tabpanel" aria-labelledby="tab-history" hidden>
+      <dl class="stats" aria-label="Transaction summary">
+        <div>
+          <dt>In</dt>
+          <dd id="history-in">₱0.00</dd>
+        </div>
+        <div>
+          <dt>Out</dt>
+          <dd id="history-out">₱0.00</dd>
+        </div>
+        <div>
+          <dt title="In minus out, including a manual total-funds correction. This matches total funds.">Balance</dt>
+          <dd id="history-balance">₱0.00</dd>
+        </div>
+        <div>
+          <dt title="COP/COD sales recorded here, but not in the balance until they are credited.">Pending</dt>
+          <dd id="history-pending">₱0.00</dd>
+        </div>
+      </dl>
+      <p class="dash-note">Collected sales and investor capital come in. Purchases and expenses go out. Pending COP/COD stays out of the balance until you credit it.</p>
+      <div class="toolbar">
+        <label class="search">
+          <span class="eyebrow">Search</span>
+          <input id="historySearch" type="search" placeholder="Name or kind" autocomplete="off">
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <caption class="sr-only">Transaction history</caption>
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">Transaction</th>
+              <th scope="col">Kind</th>
+              <th scope="col" class="num">In</th>
+              <th scope="col" class="num">Out</th>
+              <th scope="col" class="num">Balance</th>
+            </tr>
+          </thead>
+          <tbody id="historyRows"></tbody>
         </table>
       </div>
     </section>

@@ -201,7 +201,7 @@ function textMatch(query, ...parts) {
   return parts.join(" ").toLowerCase().includes(needle);
 }
 
-const TABS = ["dashboard", "inventory", "sales", "expenses", "upcoming", "investors"];
+const TABS = ["dashboard", "inventory", "sales", "expenses", "upcoming", "investors", "history"];
 
 const TAB_TITLES = {
   dashboard: "Dashboard",
@@ -210,6 +210,7 @@ const TAB_TITLES = {
   expenses: "Expenses",
   upcoming: "Upcoming expenses",
   investors: "Investors",
+  history: "Transactions",
 };
 
 const TAB_ACTIONS = {
@@ -2230,6 +2231,127 @@ function renderInvestors() {
   });
 }
 
+function historyStamp(date) {
+  const day = String(date || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day}T12:00:00.000Z` : "";
+}
+
+function historyEvents() {
+  const events = [];
+  for (const investor of state.investors) {
+    events.push({
+      at: historyStamp(investor.date),
+      kind: "Capital",
+      flow: "in",
+      name: investor.name,
+      detail: "Investor capital",
+      amount: investor.amount || 0,
+    });
+  }
+  for (const order of orderGroups(salesList())) {
+    const collected = order.lines.filter((sale) => !isPending(sale));
+    const waiting = order.lines.filter(isPending);
+    if (collected.length) {
+      events.push({
+        at: order.at,
+        kind: "Sale",
+        flow: "in",
+        name: orderTitle(collected),
+        detail: "Collected sale",
+        amount: collected.reduce((sum, sale) => sum + saleTotal(sale), 0),
+      });
+    }
+    if (waiting.length) {
+      events.push({
+        at: order.at,
+        kind: "Pending",
+        flow: "pending",
+        name: orderTitle(waiting),
+        detail: "COP/COD not credited yet",
+        amount: waiting.reduce((sum, sale) => sum + saleTotal(sale), 0),
+      });
+    }
+  }
+  for (const movement of state.movements) {
+    if (movement.type !== "buy") continue;
+    events.push({
+      at: movement.at,
+      kind: "Purchase",
+      flow: "out",
+      name: movement.quantity > 1 ? `${movement.quantity} × ${movement.itemName}` : movement.itemName,
+      detail: "Stock purchase",
+      amount: (movement.unitCost || 0) * movement.quantity,
+    });
+  }
+  for (const expense of state.expenses) {
+    events.push({
+      at: historyStamp(expense.date),
+      kind: "Expense",
+      flow: "out",
+      name: expense.name,
+      detail: expense.category || "Expense",
+      amount: expense.amount || 0,
+    });
+  }
+  if (state.fundsAdjustment) {
+    const amount = state.fundsAdjustment;
+    events.push({
+      at: "",
+      undated: true,
+      kind: "Correction",
+      flow: amount > 0 ? "in" : "out",
+      name: "Manual total funds",
+      detail: "Current correction from the dashboard",
+      amount: Math.abs(amount),
+    });
+  }
+  const ordered = events.slice().sort((a, b) => {
+    if (Boolean(a.undated) !== Boolean(b.undated)) return a.undated ? 1 : -1;
+    return String(a.at).localeCompare(String(b.at)) || a.name.localeCompare(b.name);
+  });
+  let balance = 0;
+  for (const event of ordered) {
+    if (event.flow === "in") balance += event.amount;
+    else if (event.flow === "out") balance -= event.amount;
+    event.balance = event.flow === "pending" ? null : balance;
+  }
+  return ordered.reverse();
+}
+
+function renderHistory() {
+  const events = historyEvents();
+  const inflow = events.filter((event) => event.flow === "in").reduce((sum, event) => sum + event.amount, 0);
+  const outflow = events.filter((event) => event.flow === "out").reduce((sum, event) => sum + event.amount, 0);
+  const pending = events.filter((event) => event.flow === "pending").reduce((sum, event) => sum + event.amount, 0);
+  const balance = inflow - outflow;
+  $("#history-in").textContent = money(inflow);
+  $("#history-out").textContent = money(outflow);
+  const balanceEl = $("#history-balance");
+  balanceEl.textContent = money(balance);
+  balanceEl.classList.toggle("neg", balance < 0);
+  $("#history-pending").textContent = money(pending);
+  const query = $("#historySearch").value;
+  const shown = events.filter((event) => textMatch(query, event.name, event.kind, event.detail));
+  const tone = { Sale: "pay-cash", Capital: "pay-cash", Purchase: "pay-out", Expense: "pay-out", Pending: "pay-credit", Correction: "pay-out" };
+  fillTable($("#historyRows"), shown, 6, events.length ? "Nothing in this view." : "No transactions yet.", (event) => {
+    const when = event.at ? (String(event.at).includes("T") ? formatWhen(event.at) : formatDay(event.at)) : "—";
+    const inward = event.flow === "in" ? money(event.amount) : "—";
+    const outward = event.flow === "out" ? money(event.amount) : "—";
+    const after = event.balance == null ? "—" : money(event.balance);
+    return `<tr>
+      <td data-label="Date"><span>${esc(when)}</span></td>
+      <td class="item" data-label="">
+        <span class="item-name">${esc(event.name)}</span>
+        <span class="category">${esc(event.detail)}</span>
+      </td>
+      <td data-label="Kind"><span class="pay ${event.kind === "Correction" && event.flow === "in" ? "pay-cash" : tone[event.kind] || "pay-cash"}">${esc(event.kind)}</span></td>
+      <td class="num" data-label="In">${inward}</td>
+      <td class="num${event.flow === "out" ? " neg" : ""}" data-label="Out">${outward}</td>
+      <td class="num${event.balance < 0 ? " neg" : ""}" data-label="Balance">${after}</td>
+    </tr>`;
+  });
+}
+
 function render() {
   stockAgeById = stockAges();
   dueCuts = priceCuts();
@@ -2243,6 +2365,7 @@ function render() {
   renderExpenses();
   renderUpcoming();
   renderInvestors();
+  renderHistory();
 }
 
 const ITEM_TYPES = SALE_TYPES;
@@ -3274,7 +3397,7 @@ function bind() {
     render();
   });
 
-  for (const id of ["saleSearch", "expenseSearch", "upcomingSearch", "investorSearch"]) {
+  for (const id of ["saleSearch", "expenseSearch", "upcomingSearch", "investorSearch", "historySearch"]) {
     $(`#${id}`).addEventListener("input", () => render());
   }
 

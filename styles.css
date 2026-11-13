@@ -777,6 +777,11 @@ tr.flash td { animation: rowflash 1.2s ease; }
   background: var(--ink);
 }
 
+.pay-out {
+  color: var(--gold-ink);
+  background: rgba(203, 172, 110, 0.35);
+}
+
 .flag.out { color: var(--muted); }
 
 td.neg,
