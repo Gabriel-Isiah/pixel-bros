@@ -368,6 +368,8 @@ function normalize(data) {
     const held = unpackNotes(raw.notes);
     const fulfillOn = /^\d{4}-\d{2}-\d{2}$/.test(raw.fulfillOn || "") ? raw.fulfillOn : held.fulfillOn;
     const reserved = raw.reserved === true || held.reserved || Boolean(fulfillOn);
+    const rawReprice = raw.repricedAt || held.repricedAt || "";
+    const repricedAt = REPRICE_AT.test(rawReprice) ? rawReprice : "";
     items.push({
       id: String(raw.id),
       name: String(raw.name),
@@ -382,6 +384,7 @@ function normalize(data) {
       notes: held.notes,
       reserved,
       fulfillOn: reserved ? fulfillOn : "",
+      ...(repricedAt ? { repricedAt } : {}),
     });
   }
 
@@ -451,23 +454,40 @@ function ledgerIsEmpty(ledger) {
 }
 
 const RESERVE_MARK = "\u241e";
+const REPRICE_MARK = "\u241f";
+const REPRICE_AT = /^\d{4}-\d{2}-\d{2}(?:T[\d:.+-]+Z?)?$/;
 
 function unpackNotes(stored) {
   const raw = String(stored || "");
-  const mark = raw.lastIndexOf(RESERVE_MARK);
-  if (mark < 0) return { notes: raw, reserved: false, fulfillOn: "" };
-  const notes = raw.slice(0, mark);
-  const [flag, date] = raw.slice(mark + RESERVE_MARK.length).split("|");
+  let body = raw;
+  let repricedAt = "";
+  const reprice = body.lastIndexOf(REPRICE_MARK);
+  if (reprice >= 0) {
+    const stamp = body.slice(reprice + REPRICE_MARK.length);
+    if (REPRICE_AT.test(stamp)) {
+      repricedAt = stamp;
+      body = body.slice(0, reprice);
+    }
+  }
+  const mark = body.lastIndexOf(RESERVE_MARK);
+  if (mark < 0) return { notes: body, reserved: false, fulfillOn: "", repricedAt };
+  const notes = body.slice(0, mark);
+  const [flag, date] = body.slice(mark + RESERVE_MARK.length).split("|");
   const fulfillOn = /^\d{4}-\d{2}-\d{2}$/.test(date || "") ? date : "";
-  if (flag !== "0" && flag !== "1") return { notes: raw, reserved: false, fulfillOn: "" };
-  return { notes, reserved: flag === "1" || Boolean(fulfillOn), fulfillOn };
+  if (flag !== "0" && flag !== "1") return { notes: body, reserved: false, fulfillOn: "", repricedAt };
+  return { notes, reserved: flag === "1" || Boolean(fulfillOn), fulfillOn, repricedAt };
 }
 
 function packNotes(item) {
-  const notes = unpackNotes(item?.notes).notes;
+  let notes = unpackNotes(item?.notes).notes;
   const fulfillOn = /^\d{4}-\d{2}-\d{2}$/.test(item?.fulfillOn || "") ? item.fulfillOn : "";
-  if (!item?.reserved && !fulfillOn) return notes;
-  return `${notes}${RESERVE_MARK}${item?.reserved ? "1" : "0"}|${fulfillOn}`;
+  if (item?.reserved || fulfillOn) {
+    notes = `${notes}${RESERVE_MARK}${item?.reserved ? "1" : "0"}|${fulfillOn}`;
+  }
+  if (item?.repricedAt && REPRICE_AT.test(item.repricedAt)) {
+    notes = `${notes}${REPRICE_MARK}${item.repricedAt}`;
+  }
+  return notes;
 }
 
 function itemRow(item, userId) {
@@ -986,12 +1006,13 @@ function rowHTML(item) {
     ? `<label class="reserve-when"><span>Sell / ship</span><input type="date" data-fulfill="${id}" value="${esc(item.fulfillOn || "")}" aria-label="Date to sell or ship ${name}"></label>`
     : "";
   const wait = repriceWait(item);
-  const age = stockAgeById.get(item.id);
+  const age = repriceAge(item);
+  const stockAge = stockAgeById.get(item.id);
   const repriceTitle = wait == null
     ? "No stock to reprice."
     : wait === 0
-      ? `Price cut is due. In stock ${age} days.`
-      : `${wait} ${wait === 1 ? "day" : "days"} until the weekly price cut. In stock ${age} days.`;
+      ? `Price cut is due. In stock ${stockAge} days.`
+      : `${wait} ${wait === 1 ? "day" : "days"} until the weekly price cut. In stock ${stockAge} days${item.repricedAt ? ` · last cut ${age} days ago` : ""}.`;
   const reprice = wait == null ? "—" : wait === 0 ? "Due" : String(wait);
 
   return `<tr data-id="${id}" class="${classes}">
@@ -1547,18 +1568,27 @@ function daysUntilReprice(daysInStock) {
   return 7 - intoWeek;
 }
 
-function repriceWait(item) {
+function repriceAge(item) {
   if (!item || item.quantity <= 0) return null;
-  const days = stockAgeById.get(item.id);
+  const stockDays = stockAgeById.get(item.id);
+  if (stockDays == null) return null;
+  if (!item.repricedAt || !REPRICE_AT.test(item.repricedAt)) return stockDays;
+  const since = calendarDaysBetween(item.repricedAt, new Date().toISOString());
+  if (since == null || since < 0) return stockDays;
+  return Math.min(stockDays, since);
+}
+
+function repriceWait(item) {
+  const days = repriceAge(item);
   if (days == null) return null;
   return daysUntilReprice(days);
 }
 
 function priceCuts() {
   const due = [];
-  for (const [id, days] of stockAgeById) {
-    const item = itemById(id);
-    if (!item || item.quantity <= 0 || days < 7) continue;
+  for (const item of state.items) {
+    const days = repriceAge(item);
+    if (days == null || days < 7) continue;
     due.push({ item, days, weeks: Math.floor(days / 7) });
   }
   due.sort((a, b) => b.days - a.days || a.item.name.localeCompare(b.item.name));
@@ -1585,7 +1615,9 @@ function renderPriceCuts() {
     name.textContent = row.item.name;
     const meta = document.createElement("span");
     meta.className = "category";
-    meta.textContent = `${row.days} days in stock`;
+    meta.textContent = row.item.repricedAt
+      ? `${row.days} days since last cut`
+      : `${row.days} days in stock`;
     text.append(name, meta);
     const aside = document.createElement("span");
     aside.className = "aside";
@@ -2536,7 +2568,9 @@ function onItemSubmit(event) {
     const item = itemById(editingId);
     if (!item) return;
     const previousQty = item.quantity;
+    const previousPrice = item.price;
     Object.assign(item, draft);
+    if (draft.price !== previousPrice) item.repricedAt = new Date().toISOString();
     if (draft.quantity !== previousQty) {
       pushMovement({
         type: "recount",
@@ -2546,6 +2580,8 @@ function onItemSubmit(event) {
         unitCost: previousQty,
       });
       notify(`Recounted ${item.name} to ${item.quantity}.`);
+    } else if (draft.price !== previousPrice) {
+      notify(`Repriced ${item.name}. Next cut in 7 days.`);
     } else {
       notify(`Updated ${item.name}.`);
     }
@@ -2859,12 +2895,18 @@ function onSellSubmit(event) {
     : null;
   const at = orderDraft.at || new Date().toISOString();
   for (const line of lines) {
-    const item = itemById(line.itemId);
-    if (item) item.quantity = Math.max(0, item.quantity - line.quantity);
+    const item = itemById(line.itemId) || state.items.find((entry) => entry.name === line.itemName) || null;
+    if (item) {
+      item.quantity = Math.max(0, item.quantity - line.quantity);
+      if (item.quantity === 0) {
+        item.reserved = false;
+        item.fulfillOn = "";
+      }
+    }
     pushMovement({
       id: `${orderDraft.id}~${uid()}`,
       type: "sell",
-      itemId: line.itemId,
+      itemId: item?.id || line.itemId,
       itemName: line.itemName,
       quantity: line.quantity,
       unitCost: line.unitCost || 0,
